@@ -142,6 +142,69 @@ PJRT_Error* hhlo_pjrt_execute(PJRT_Api* api, PJRT_LoadedExecutable* exec,
 }
 
 // ---------------------------------------------------------------------------
+// Buffer type constants (exposed to Haskell FFI)
+// ---------------------------------------------------------------------------
+
+int hhlo_buffer_type_invalid(void)   { return PJRT_Buffer_Type_INVALID; }
+int hhlo_buffer_type_pred(void)      { return PJRT_Buffer_Type_PRED; }
+int hhlo_buffer_type_s8(void)        { return PJRT_Buffer_Type_S8; }
+int hhlo_buffer_type_s16(void)       { return PJRT_Buffer_Type_S16; }
+int hhlo_buffer_type_s32(void)       { return PJRT_Buffer_Type_S32; }
+int hhlo_buffer_type_s64(void)       { return PJRT_Buffer_Type_S64; }
+int hhlo_buffer_type_u8(void)        { return PJRT_Buffer_Type_U8; }
+int hhlo_buffer_type_u16(void)       { return PJRT_Buffer_Type_U16; }
+int hhlo_buffer_type_u32(void)       { return PJRT_Buffer_Type_U32; }
+int hhlo_buffer_type_u64(void)       { return PJRT_Buffer_Type_U64; }
+int hhlo_buffer_type_f16(void)       { return PJRT_Buffer_Type_F16; }
+int hhlo_buffer_type_f32(void)       { return PJRT_Buffer_Type_F32; }
+int hhlo_buffer_type_f64(void)       { return PJRT_Buffer_Type_F64; }
+int hhlo_buffer_type_bf16(void)      { return PJRT_Buffer_Type_BF16; }
+int hhlo_buffer_type_c64(void)       { return PJRT_Buffer_Type_C64; }
+int hhlo_buffer_type_c128(void)      { return PJRT_Buffer_Type_C128; }
+
+// ---------------------------------------------------------------------------
+// Executable metadata
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_executable_num_outputs(PJRT_Api* api,
+                                              PJRT_LoadedExecutable* loaded_exec,
+                                              size_t* out_num_outputs) {
+    // Get the underlying PJRT_Executable
+    PJRT_LoadedExecutable_GetExecutable_Args get_args = {0};
+    get_args.struct_size = PJRT_LoadedExecutable_GetExecutable_Args_STRUCT_SIZE;
+    get_args.loaded_executable = loaded_exec;
+    get_args.executable = NULL;
+
+    PJRT_Error* err = api->PJRT_LoadedExecutable_GetExecutable(&get_args);
+    if (err != NULL) {
+        return err;
+    }
+
+    // Query number of outputs
+    PJRT_Executable_NumOutputs_Args num_args = {0};
+    num_args.struct_size = PJRT_Executable_NumOutputs_Args_STRUCT_SIZE;
+    num_args.executable = get_args.executable;
+    err = api->PJRT_Executable_NumOutputs(&num_args);
+    if (err != NULL) {
+        api->PJRT_Executable_Destroy(&(PJRT_Executable_Destroy_Args){
+            .struct_size = PJRT_Executable_Destroy_Args_STRUCT_SIZE,
+            .executable = get_args.executable
+        });
+        return err;
+    }
+
+    *out_num_outputs = num_args.num_outputs;
+
+    // Clean up the temporary PJRT_Executable
+    api->PJRT_Executable_Destroy(&(PJRT_Executable_Destroy_Args){
+        .struct_size = PJRT_Executable_Destroy_Args_STRUCT_SIZE,
+        .executable = get_args.executable
+    });
+
+    return NULL;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

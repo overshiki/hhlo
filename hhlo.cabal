@@ -48,6 +48,39 @@ executable hhlo-demo
     hs-source-dirs:   app
     default-language: GHC2021
 
+executable example-add
+    import:           warnings
+    main-is:          01-add.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-matmul
+    import:           warnings
+    main-is:          02-matmul.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-chain-ops
+    import:           warnings
+    main-is:          03-chain-ops.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
 test-suite hhlo-test
     import:           warnings
     type:             exitcode-stdio-1.0

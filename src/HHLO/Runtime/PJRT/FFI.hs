@@ -40,6 +40,9 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_compile"
 foreign import ccall "pjrt_shim.h hhlo_pjrt_loaded_executable_destroy"
     c_pjrtLoadedExecutableDestroy :: Ptr PJRTApi -> Ptr PJRTExecutable -> IO (Ptr PJRTError)
 
+foreign import ccall "pjrt_shim.h hhlo_pjrt_executable_num_outputs"
+    c_pjrtExecutableNumOutputs :: Ptr PJRTApi -> Ptr PJRTExecutable -> Ptr CSize -> IO (Ptr PJRTError)
+
 -- ---------------------------------------------------------------------------
 -- Execution
 -- ---------------------------------------------------------------------------

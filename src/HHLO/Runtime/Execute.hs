@@ -3,10 +3,12 @@ module HHLO.Runtime.Execute
     , executeAsync
     ) where
 
+import GHC.ForeignPtr (unsafeForeignPtrToPtr)
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
 import Foreign.Ptr
 import Foreign.Storable
+import qualified Foreign.Concurrent as Conc (newForeignPtr)
 
 import Control.Exception (throwIO)
 import HHLO.Runtime.PJRT.FFI
@@ -17,20 +19,25 @@ import HHLO.Runtime.PJRT.Error (PJRTException(..), withErrorMessage)
 -- Returns the list of output buffers.
 execute :: PJRTApi -> PJRTExecutable -> [PJRTBuffer] -> IO [PJRTBuffer]
 execute api exec buffers = do
-    -- Prepare output slots (assume at most 8 outputs for now)
-    let maxOutputs = 8
+    -- Query the executable's actual output count instead of hardcoding.
+    numOutputs <- alloca $ \numOutPtr -> do
+        err <- c_pjrtExecutableNumOutputs (unApi api) (unExec exec) numOutPtr
+        if err == nullPtr
+            then peek numOutPtr
+            else do
+                withErrorMessage (unApi api) err >>= throwIO . PJRTException
     withArrayLen (map unBuffer buffers) $ \n bufArr -> do
-        allocaArray maxOutputs $ \outArr -> do
-            pokeArray outArr (replicate maxOutputs nullPtr)
+        allocaArray (fromIntegral numOutputs) $ \outArr -> do
+            pokeArray outArr (replicate (fromIntegral numOutputs) nullPtr)
             alloca $ \numOutPtr -> do
                 err <- c_pjrtExecute (unApi api) (unExec exec)
                         (fromIntegral n) bufArr
-                        (fromIntegral maxOutputs) outArr numOutPtr
+                        numOutputs outArr numOutPtr
                 if err == nullPtr
                     then do
-                        numOut <- peek numOutPtr
-                        outPtrs <- peekArray (fromIntegral numOut) outArr
-                        return $ map PJRTBuffer outPtrs
+                        actualNumOut <- peek numOutPtr
+                        outPtrs <- peekArray (fromIntegral actualNumOut) outArr
+                        mapM (wrapBuffer api) outPtrs
                     else do
                         withErrorMessage (unApi api) err >>= throwIO . PJRTException
 
@@ -44,7 +51,15 @@ unApi :: PJRTApi -> Ptr PJRTApi
 unApi (PJRTApi p) = p
 
 unExec :: PJRTExecutable -> Ptr PJRTExecutable
-unExec (PJRTExecutable p) = p
+unExec (PJRTExecutable fp) = unsafeForeignPtrToPtr fp
 
 unBuffer :: PJRTBuffer -> Ptr PJRTBuffer
-unBuffer (PJRTBuffer p) = p
+unBuffer (PJRTBuffer fp) = unsafeForeignPtrToPtr fp
+
+-- | Wrap a raw PJRT buffer pointer in a 'ForeignPtr' with a finalizer.
+wrapBuffer :: PJRTApi -> Ptr PJRTBuffer -> IO PJRTBuffer
+wrapBuffer api rawPtr = do
+    fp <- Conc.newForeignPtr rawPtr $ do
+        _ <- c_pjrtBufferDestroy (unApi api) rawPtr
+        return ()
+    return $ PJRTBuffer fp

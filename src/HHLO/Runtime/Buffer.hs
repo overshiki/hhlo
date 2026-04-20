@@ -5,14 +5,14 @@ module HHLO.Runtime.Buffer
     , fromDevice
     , toDeviceF32
     , fromDeviceF32
-    , destroyBuffer
     ) where
 
 import Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as V
 import Foreign.C
-import Foreign.C.Types (CInt)
-import Foreign.ForeignPtr
+import qualified Foreign.Concurrent as Conc (newForeignPtr)
+import Foreign.ForeignPtr (newForeignPtr)
+import GHC.ForeignPtr (unsafeForeignPtrToPtr)
 import Data.Int (Int64)
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
@@ -25,21 +25,26 @@ import HHLO.Runtime.PJRT.Error
 
 -- | Create a PJRT buffer from a host 'Vector'.
 -- The vector data must be contiguous (which 'Vector' guarantees).
+-- The returned buffer is managed by a 'ForeignPtr' finalizer that calls
+-- 'PJRT_Buffer_Destroy' when the value is garbage-collected.
 toDevice :: Storable a
          => PJRTApi -> PJRTClient -> Vector a -> [Int64] -> CInt -> IO PJRTBuffer
 toDevice api client vec dims dtype =
     V.unsafeWith vec $ \ptr -> do
-        withArrayLen (map fromIntegral dims) $ \n dimArr -> do
+        withArrayLen (map fromIntegral dims :: [Int64]) $ \n dimArr -> do
             alloca $ \bufPtrPtr -> do
                 checkError (unApi api) $ do
                     c_pjrtBufferFromHost (unApi api) (unClient client)
                         (castPtr ptr) dtype dimArr (fromIntegral n) bufPtrPtr
-                bufPtr <- peek bufPtrPtr
-                return $ PJRTBuffer bufPtr
+                rawPtr <- peek bufPtrPtr
+                fp <- Conc.newForeignPtr rawPtr $ do
+                    _ <- c_pjrtBufferDestroy (unApi api) rawPtr
+                    return ()
+                return $ PJRTBuffer fp
 
 -- | Convenience: create an F32 buffer from a Float vector.
 toDeviceF32 :: PJRTApi -> PJRTClient -> Vector Float -> [Int64] -> IO PJRTBuffer
-toDeviceF32 api client vec dims = toDevice api client vec dims 11  -- PJRT_Buffer_Type_F32 = 11
+toDeviceF32 api client vec dims = toDevice api client vec dims bufferTypeF32
 
 -- | Copy a PJRT buffer back to a host 'Vector'.
 -- The caller must know the expected number of elements.
@@ -57,11 +62,6 @@ fromDevice api buf numElems = do
 fromDeviceF32 :: PJRTApi -> PJRTBuffer -> Int -> IO (Vector Float)
 fromDeviceF32 = fromDevice
 
--- | Destroy a device buffer, releasing its memory.
-destroyBuffer :: PJRTApi -> PJRTBuffer -> IO ()
-destroyBuffer api buf = do
-    checkError (unApi api) $ c_pjrtBufferDestroy (unApi api) (unBuf buf)
-
 unApi :: PJRTApi -> Ptr PJRTApi
 unApi (PJRTApi p) = p
 
@@ -69,4 +69,4 @@ unClient :: PJRTClient -> Ptr PJRTClient
 unClient (PJRTClient p) = p
 
 unBuf :: PJRTBuffer -> Ptr PJRTBuffer
-unBuf (PJRTBuffer p) = p
+unBuf (PJRTBuffer fp) = unsafeForeignPtrToPtr fp

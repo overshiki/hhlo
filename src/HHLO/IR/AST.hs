@@ -21,11 +21,14 @@ import HHLO.Core.Types (DType, dtypeToText)
 newtype ValueId = ValueId { unValueId :: Int }
     deriving (Eq, Ord, Show, Num)
 
--- | Render a 'ValueId' as an MLIR value reference (e.g. @"%42"@).
+-- | Render a 'ValueId' as an MLIR value reference.
+-- Non-negative IDs are operation results (@"%42"@).
+-- Negative IDs are function arguments: @-1@ prints as @"%arg0"@,
+-- @-2@ as @"%arg1"@, etc.
 valueRef :: ValueId -> Text
 valueRef (ValueId n)
     | n >= 0    = "%" <> T.pack (show n)
-    | otherwise = "%neg" <> T.pack (show (abs n))
+    | otherwise = "%arg" <> T.pack (show (abs n - 1))
 
 -- | A concrete tensor type with runtime-known shape.
 data TensorType = TensorType
@@ -47,11 +50,12 @@ data Attribute
 
 -- | A single StableHLO operation.
 data Operation = Operation
-    { opName       :: !Text
-    , opOperands   :: ![ValueId]
-    , opAttributes :: ![Attribute]
-    , opResult     :: !ValueId
-    , opResultType :: !TensorType
+    { opName         :: !Text
+    , opOperands     :: ![ValueId]
+    , opOperandTypes :: ![TensorType]
+    , opAttributes   :: ![Attribute]
+    , opResult       :: !ValueId
+    , opResultType   :: !TensorType
     }
     deriving (Eq, Show)
 

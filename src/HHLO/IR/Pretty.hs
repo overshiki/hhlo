@@ -24,7 +24,14 @@ renderLazy = toLazyText . pretty
 
 instance Pretty Module where
     pretty (Module funcs) =
-        mconcat (map ((<> "\n") . pretty) funcs)
+        "module {\n"
+        <> mconcat (map ((<> "\n") . indentFunc . pretty) funcs)
+        <> "}"
+      where
+        indentFunc b =
+            let ls = TL.splitOn (TL.pack "\n") (toLazyText b)
+                indented = map (\l -> if TL.null l then l else TL.pack "  " <> l) ls
+            in fromText (TL.toStrict (TL.intercalate (TL.pack "\n") indented))
 
 instance Pretty Function where
     pretty (Function name args result ops) =
@@ -37,24 +44,27 @@ instance Pretty Function where
 
 returnLine :: [Operation] -> TensorType -> Builder
 returnLine []     result = "    return : " <> pretty result <> "\n"
-returnLine (o:_)  result = "    return " <> valueRefBuilder (opResult o) <> " : " <> pretty result <> "\n"
+returnLine ops    result =
+    let lastOp = last ops
+    in "    return " <> valueRefBuilder (opResult lastOp) <> " : " <> pretty result <> "\n"
 
 instance Pretty FuncArg where
     pretty (FuncArg name t) =
-        fromText name <> ": " <> pretty t
+        fromText "%" <> fromText name <> ": " <> pretty t
 
 instance Pretty Operation where
-    pretty (Operation name operands attrs result resultType) =
+    pretty (Operation name operands operandTypes attrs result resultType) =
         valueRefBuilder result <> " = " <> fromText name
         <> (if null operands then mempty else " " <> mconcat (intersperse (fromText ", ") (map valueRefBuilder operands)))
         <> (if null attrs then mempty else " " <> prettyAttrs attrs)
-        <> " : " <> prettyResultType operands resultType
+        <> " : " <> prettyResultType operandTypes resultType
 
 -- | When an operation has no operands we print just the result type.
 -- When it has operands we print (operandTypes) -> resultType.
-prettyResultType :: [ValueId] -> TensorType -> Builder
+prettyResultType :: [TensorType] -> TensorType -> Builder
 prettyResultType [] rt = pretty rt
-prettyResultType _  rt = pretty rt  -- Simplified: PJRT doesn't need full func type
+prettyResultType ots rt =
+    "(" <> mconcat (intersperse (fromText ", ") (map pretty ots)) <> ") -> " <> pretty rt
 
 instance Pretty TensorType where
     pretty (TensorType [] dtype) =

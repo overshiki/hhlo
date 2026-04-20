@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -9,6 +10,11 @@ import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr
 import Foreign.Storable (peek)
 
+import HHLO.Core.Types
+import HHLO.EDSL.Ops
+import HHLO.IR.AST (FuncArg(..), TensorType(..))
+import HHLO.IR.Builder
+import HHLO.IR.Pretty
 import HHLO.Runtime.PJRT.FFI
 import HHLO.Runtime.PJRT.Types
 import HHLO.Runtime.PJRT.Error
@@ -35,14 +41,22 @@ main = do
         PJRTClient <$> peek clientPtrPtr
     putStrLn "Client created."
 
-    -- 3. Compile a simple StableHLO program
-    putStrLn "Compiling StableHLO program..."
-    let mlir = T.unlines
-            [ "func.func @main(%arg0: tensor<2x2xf32>, %arg1: tensor<2x2xf32>) -> tensor<2x2xf32> {"
-            , "    %0 = stablehlo.add %arg0, %arg1 : tensor<2x2xf32>"
-            , "    return %0 : tensor<2x2xf32>"
-            , "}"
+    -- 3. Build and compile a simple StableHLO program using the EDSL
+    putStrLn "Building program with EDSL..."
+    let modu = moduleFromBuilder @'[2,2] @'F32 "main"
+            [ FuncArg "arg0" (TensorType [2, 2] F32)
+            , FuncArg "arg1" (TensorType [2, 2] F32)
             ]
+            $ do
+                x <- arg
+                y <- arg
+                z <- add x y
+                return z
+    let mlir = render modu
+    putStrLn "Generated MLIR:"
+    putStrLn (T.unpack mlir)
+
+    putStrLn "Compiling..."
     exec <- compile api client mlir
     putStrLn "Compilation successful."
 
@@ -69,14 +83,9 @@ main = do
         then putStrLn "SUCCESS: Results match expected values!"
         else putStrLn $ "FAILURE: Expected " ++ show expected ++ ", got " ++ show (V.toList result)
 
-    -- 8. Cleanup
-    destroyBuffer api bufX
-    destroyBuffer api bufY
-    destroyBuffer api bufZ
-    checkError (unApi api) $ c_pjrtLoadedExecutableDestroy (unApi api) (unExec exec)
+    -- 8. Cleanup (client only; buffers and executable have ForeignPtr finalizers)
     checkError (unApi api) $ c_pjrtClientDestroy (unApi api) (unClient client)
     putStrLn "Cleanup complete."
   where
     unApi (PJRTApi p) = p
     unClient (PJRTClient p) = p
-    unExec (PJRTExecutable p) = p

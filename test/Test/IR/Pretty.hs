@@ -21,11 +21,12 @@ tests = testGroup "Pretty"
                 , FuncArg "arg1" (TensorType [2, 2] F32)
                 ]
                 (TensorType [2, 2] F32)
-                [ Operation "stablehlo.add" [ValueId 0, ValueId 1] [] (ValueId 2) (TensorType [2, 2] F32)
+                [ Operation "stablehlo.add" [ValueId 0, ValueId 1]
+                    [TensorType [2, 2] F32, TensorType [2, 2] F32] [] (ValueId 2) (TensorType [2, 2] F32)
                 ]
         let expected =
-                "func.func @main(arg0: tensor<2x2xf32>, arg1: tensor<2x2xf32>) -> tensor<2x2xf32> {\n"
-                <> "    %2 = stablehlo.add %0, %1 : tensor<2x2xf32>\n"
+                "func.func @main(%arg0: tensor<2x2xf32>, %arg1: tensor<2x2xf32>) -> tensor<2x2xf32> {\n"
+                <> "    %2 = stablehlo.add %0, %1 : (tensor<2x2xf32>, tensor<2x2xf32>) -> tensor<2x2xf32>\n"
                 <> "    return %2 : tensor<2x2xf32>\n"
                 <> "}"
         render fn @?= expected
