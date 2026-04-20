@@ -1,0 +1,271 @@
+/* cbits/pjrt_shim.c
+ * Minimal C shim around the PJRT C API.
+ * We include the full upstream pjrt_c_api.h and expose
+ * a small set of wrapper functions with simpler signatures.
+ */
+
+#include <dlfcn.h>
+#include <stdlib.h>
+#include <string.h>
+#include "pjrt_c_api.h"
+
+// ---------------------------------------------------------------------------
+// Plugin loading
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_load_plugin(const char* path, PJRT_Api** out_api) {
+    void* handle = dlopen(path, RTLD_LAZY | RTLD_LOCAL);
+    if (!handle) {
+        *out_api = NULL;
+        return NULL;
+    }
+
+    PJRT_Api* (*get_api)(void) = (PJRT_Api* (*)(void)) dlsym(handle, "GetPjrtApi");
+    if (!get_api) {
+        dlclose(handle);
+        *out_api = NULL;
+        return NULL;
+    }
+
+    *out_api = get_api();
+    return NULL;
+}
+
+// ---------------------------------------------------------------------------
+// Client
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_create_client(PJRT_Api* api, PJRT_Client** out_client) {
+    PJRT_Client_Create_Args args = {0};
+    args.struct_size = PJRT_Client_Create_Args_STRUCT_SIZE;
+    args.client = NULL;
+
+    PJRT_Error* err = api->PJRT_Client_Create(&args);
+    if (err == NULL) {
+        *out_client = args.client;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_client_destroy(PJRT_Api* api, PJRT_Client* client) {
+    PJRT_Client_Destroy_Args args = {0};
+    args.struct_size = PJRT_Client_Destroy_Args_STRUCT_SIZE;
+    args.client = client;
+    return api->PJRT_Client_Destroy(&args);
+}
+
+// ---------------------------------------------------------------------------
+// Compilation
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_compile(PJRT_Api* api, PJRT_Client* client,
+                               const char* code, size_t code_size,
+                               PJRT_LoadedExecutable** out_exec) {
+    PJRT_Program program = {0};
+    program.struct_size = PJRT_Program_STRUCT_SIZE;
+    program.code = (char*) code;
+    program.code_size = code_size;
+    program.format = "mlir";
+    program.format_size = 4;
+
+    // Minimal CompileOptionsProto:
+    //   field 3 (executable_build_options, wire type 2 = length-delimited): 0x1a
+    //   length: 4
+    //   submessage (ExecutableBuildOptionsProto):
+    //     field 4 (num_replicas, varint): 0x20 0x01
+    //     field 5 (num_partitions, varint): 0x28 0x01
+    static const char compile_options_proto[] = {0x1a, 0x04, 0x20, 0x01, 0x28, 0x01};
+
+    PJRT_Client_Compile_Args args = {0};
+    args.struct_size = PJRT_Client_Compile_Args_STRUCT_SIZE;
+    args.client = client;
+    args.program = &program;
+    args.compile_options = compile_options_proto;
+    args.compile_options_size = sizeof(compile_options_proto);
+    args.executable = NULL;
+
+    PJRT_Error* err = api->PJRT_Client_Compile(&args);
+    if (err == NULL) {
+        *out_exec = args.executable;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_loaded_executable_destroy(PJRT_Api* api,
+                                                  PJRT_LoadedExecutable* exec) {
+    PJRT_LoadedExecutable_Destroy_Args args = {0};
+    args.struct_size = PJRT_LoadedExecutable_Destroy_Args_STRUCT_SIZE;
+    args.executable = exec;
+    return api->PJRT_LoadedExecutable_Destroy(&args);
+}
+
+// ---------------------------------------------------------------------------
+// Execution
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_execute(PJRT_Api* api, PJRT_LoadedExecutable* exec,
+                               size_t num_args, PJRT_Buffer** args_in,
+                               size_t max_outputs,
+                               PJRT_Buffer** out_outputs,
+                               size_t* out_num_outputs) {
+    // Single-device execution for simplicity
+    PJRT_ExecuteOptions options = {0};
+    options.struct_size = PJRT_ExecuteOptions_STRUCT_SIZE;
+
+    PJRT_Buffer* const* arg_list = (PJRT_Buffer* const*) args_in;
+
+    // Output pre-allocation: caller provides array of PJRT_Buffer* of size max_outputs
+    PJRT_Buffer** output_list = out_outputs;
+
+    PJRT_LoadedExecutable_Execute_Args exec_args = {0};
+    exec_args.struct_size = PJRT_LoadedExecutable_Execute_Args_STRUCT_SIZE;
+    exec_args.executable = exec;
+    exec_args.options = &options;
+    exec_args.argument_lists = &arg_list;
+    exec_args.num_devices = 1;
+    exec_args.num_args = num_args;
+    exec_args.output_lists = &output_list;
+    exec_args.device_complete_events = NULL;
+    exec_args.execute_device = NULL;
+
+    PJRT_Error* err = api->PJRT_LoadedExecutable_Execute(&exec_args);
+    if (err == NULL) {
+        // Count outputs by finding how many non-NULL entries were written
+        size_t n = 0;
+        for (size_t i = 0; i < max_outputs; ++i) {
+            if (out_outputs[i] != NULL) n++;
+            else break;
+        }
+        *out_num_outputs = n;
+    }
+    return err;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+static PJRT_Device* get_first_addressable_device(PJRT_Api* api, PJRT_Client* client) {
+    PJRT_Client_AddressableDevices_Args args = {0};
+    args.struct_size = PJRT_Client_AddressableDevices_Args_STRUCT_SIZE;
+    args.client = client;
+    PJRT_Error* err = api->PJRT_Client_AddressableDevices(&args);
+    if (err != NULL || args.num_addressable_devices == 0) {
+        if (err) api->PJRT_Error_Destroy(&(PJRT_Error_Destroy_Args){.struct_size = PJRT_Error_Destroy_Args_STRUCT_SIZE, .error = err});
+        return NULL;
+    }
+    return args.addressable_devices[0];
+}
+
+// ---------------------------------------------------------------------------
+// Buffers
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_buffer_from_host(PJRT_Api* api, PJRT_Client* client,
+                                        const void* data,
+                                        PJRT_Buffer_Type type,
+                                        const int64_t* dims, size_t num_dims,
+                                        PJRT_Buffer** out_buffer) {
+    PJRT_Device* device = get_first_addressable_device(api, client);
+
+    PJRT_Client_BufferFromHostBuffer_Args args = {0};
+    args.struct_size = PJRT_Client_BufferFromHostBuffer_Args_STRUCT_SIZE;
+    args.client = client;
+    args.data = data;
+    args.type = type;
+    args.dims = dims;
+    args.num_dims = num_dims;
+    args.byte_strides = NULL;
+    args.num_byte_strides = 0;
+    args.host_buffer_semantics = PJRT_HostBufferSemantics_kImmutableOnlyDuringCall;
+    args.device = device;
+    args.memory = NULL;
+    args.device_layout = NULL;
+    args.done_with_host_buffer = NULL;
+    args.buffer = NULL;
+
+    PJRT_Error* err = api->PJRT_Client_BufferFromHostBuffer(&args);
+    if (err == NULL) {
+        *out_buffer = args.buffer;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_buffer_to_host(PJRT_Api* api, PJRT_Buffer* buffer,
+                                      void* dst, size_t dst_size,
+                                      PJRT_Event** out_event) {
+    PJRT_Buffer_ToHostBuffer_Args args = {0};
+    args.struct_size = PJRT_Buffer_ToHostBuffer_Args_STRUCT_SIZE;
+    args.src = buffer;
+    args.host_layout = NULL;
+    args.dst = dst;
+    args.dst_size = dst_size;
+    args.event = NULL;
+
+    PJRT_Error* err = api->PJRT_Buffer_ToHostBuffer(&args);
+    if (err == NULL && args.event != NULL) {
+        PJRT_Event_Await_Args await_args = {0};
+        await_args.struct_size = PJRT_Event_Await_Args_STRUCT_SIZE;
+        await_args.event = args.event;
+        api->PJRT_Event_Await(&await_args);
+        PJRT_Event_Destroy_Args destroy_args = {0};
+        destroy_args.struct_size = PJRT_Event_Destroy_Args_STRUCT_SIZE;
+        destroy_args.event = args.event;
+        api->PJRT_Event_Destroy(&destroy_args);
+    }
+    if (err == NULL && out_event != NULL) {
+        *out_event = args.event;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_buffer_destroy(PJRT_Api* api, PJRT_Buffer* buffer) {
+    PJRT_Buffer_Destroy_Args args = {0};
+    args.struct_size = PJRT_Buffer_Destroy_Args_STRUCT_SIZE;
+    args.buffer = buffer;
+    return api->PJRT_Buffer_Destroy(&args);
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_event_await(PJRT_Api* api, PJRT_Event* event) {
+    PJRT_Event_Await_Args args = {0};
+    args.struct_size = PJRT_Event_Await_Args_STRUCT_SIZE;
+    args.event = event;
+    return api->PJRT_Event_Await(&args);
+}
+
+PJRT_Error* hhlo_pjrt_event_destroy(PJRT_Api* api, PJRT_Event* event) {
+    PJRT_Event_Destroy_Args args = {0};
+    args.struct_size = PJRT_Event_Destroy_Args_STRUCT_SIZE;
+    args.event = event;
+    return api->PJRT_Event_Destroy(&args);
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_error_message(PJRT_Api* api, PJRT_Error* error,
+                                     const char** out_msg, size_t* out_size) {
+    PJRT_Error_Message_Args args = {0};
+    args.struct_size = PJRT_Error_Message_Args_STRUCT_SIZE;
+    args.error = error;
+    args.message = NULL;
+    args.message_size = 0;
+
+    api->PJRT_Error_Message(&args);
+    *out_msg = args.message;
+    *out_size = args.message_size;
+    return NULL;
+}
+
+PJRT_Error* hhlo_pjrt_error_destroy(PJRT_Api* api, PJRT_Error* error) {
+    PJRT_Error_Destroy_Args args = {0};
+    args.struct_size = PJRT_Error_Destroy_Args_STRUCT_SIZE;
+    args.error = error;
+    api->PJRT_Error_Destroy(&args);
+    return NULL;
+}

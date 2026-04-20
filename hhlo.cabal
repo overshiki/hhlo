@@ -1,0 +1,68 @@
+cabal-version:      3.16
+name:               hhlo
+version:            0.1.0.0
+author:             overshiki
+maintainer:         le.niu@hotmail.com
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wcompat -optl-L/usr/local/lib64 -optl-lstdc++ -optl-Wl,-rpath,/usr/local/lib64
+
+library
+    import:           warnings
+    exposed-modules:
+        HHLO.Prelude
+        HHLO.Core.Types
+        HHLO.IR.AST
+        HHLO.IR.Builder
+        HHLO.IR.Pretty
+        HHLO.EDSL.Ops
+        HHLO.Runtime.PJRT.FFI
+        HHLO.Runtime.PJRT.Types
+        HHLO.Runtime.PJRT.Error
+        HHLO.Runtime.Compile
+        HHLO.Runtime.Execute
+        HHLO.Runtime.Buffer
+    build-depends:
+        base          ^>= 4.18,
+        text          ^>= 2.0,
+        bytestring    ^>= 0.12,
+        vector        ^>= 0.13,
+        containers    ^>= 0.6,
+        transformers  ^>= 0.6,
+        mtl           ^>= 2.3
+    hs-source-dirs:   src
+    default-language: GHC2021
+    include-dirs:     cbits
+    c-sources:        cbits/pjrt_shim.c
+    extra-libraries:  dl
+
+executable hhlo-demo
+    import:           warnings
+    main-is:          Main.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   app
+    default-language: GHC2021
+
+test-suite hhlo-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    other-modules:
+        Test.IR.Pretty
+        Test.Runtime.EndToEnd
+    build-depends:
+        base,
+        hhlo,
+        text,
+        bytestring,
+        vector,
+        tasty             ^>= 1.5,
+        tasty-hunit       ^>= 0.10
+    hs-source-dirs:   test
+    default-language: GHC2021
+    extra-libraries:  dl stdc++
