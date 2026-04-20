@@ -68,6 +68,25 @@ instance Pretty Operation where
         <> prettyReduceAttrs attrs
         <> " : " <> prettyResultType operandTypes resultType
         <> mconcat (map prettyRegion regions)
+    pretty (Operation "stablehlo.convolution" operands operandTypes attrs regions result resultType) =
+        -- Custom format for convolution:
+        --   %r = stablehlo.convolution(%lhs, %rhs)
+        --        dim_numbers = ..., window = {...}
+        --        {batch_group_count = 1 : i64, ...}
+        --        : (lhs_type, rhs_type) -> result_type
+        valueRefBuilder result <> " = stablehlo.convolution("
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+        <> prettyConvAttrs attrs
+        <> " : " <> prettyResultType operandTypes resultType
+        <> mconcat (map prettyRegion regions)
+    pretty (Operation "stablehlo.batch_norm_inference" operands operandTypes attrs regions result resultType) =
+        -- Custom format: %r = stablehlo.batch_norm_inference %x, %scale, %offset, %mean, %variance
+        --   <{epsilon = 1.0E-5 : f32, feature_index = 1 : i64}> : type
+        valueRefBuilder result <> " = stablehlo.batch_norm_inference "
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands))
+        <> prettyBNAttrs attrs
+        <> " : " <> prettyResultType operandTypes resultType
+        <> mconcat (map prettyRegion regions)
     pretty (Operation name operands operandTypes attrs regions result resultType) =
         -- stablehlo.return has no result value
         (if name == "stablehlo.return" then mempty else valueRefBuilder result <> " = ")
@@ -109,6 +128,28 @@ lookupAttrString name = foldr f ""
   where
     f (AttrString n s) acc | n == name = s <> acc
     f _ acc = acc
+
+-- | Pretty-print attributes for 'stablehlo.convolution'.
+-- Extracts 'dim_numbers' and 'window' from the custom string attributes,
+-- then renders the remaining attrs in the standard dictionary.
+prettyConvAttrs :: [Attribute] -> Builder
+prettyConvAttrs attrs =
+    let dimNums   = lookupAttrString "dim_numbers" attrs
+        window    = lookupAttrString "window" attrs
+        rest      = filter (not . isCustomConvAttr) attrs
+        custom    = (if T.null dimNums then mempty else " dim_numbers = " <> fromText dimNums <> ",")
+                 <> (if T.null window  then mempty else " window = " <> fromText window)
+        dict      = if null rest then mempty else " " <> prettyAttrs rest
+    in custom <> dict
+  where
+    isCustomConvAttr (AttrString "dim_numbers" _) = True
+    isCustomConvAttr (AttrString "window" _)      = True
+    isCustomConvAttr _                            = False
+
+-- | Pretty-print attributes for 'stablehlo.batch_norm_inference'.
+-- Uses the generic op format with <{...}> around the attributes.
+prettyBNAttrs :: [Attribute] -> Builder
+prettyBNAttrs attrs = " <{" <> mconcat (intersperse (", ") (map prettyAttr attrs)) <> ">}"
 
 -- | Build the nested list syntax for a 'dense<...>' attribute.
 -- Scalar: @0.0@, 1-D: @[1, 2]@, 2-D: @[[1, 2], [3, 4]]@, etc.

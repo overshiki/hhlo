@@ -137,6 +137,39 @@ executable example-reduce
     hs-source-dirs:   examples
     default-language: GHC2021
 
+executable example-softmax
+    import:           warnings
+    main-is:          09-softmax.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-conv2d
+    import:           warnings
+    main-is:          10-conv2d.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-batch-norm
+    import:           warnings
+    main-is:          11-batch-norm.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
 test-suite hhlo-test
     import:           warnings
     type:             exitcode-stdio-1.0

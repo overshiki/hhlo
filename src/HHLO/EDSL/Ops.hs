@@ -27,6 +27,12 @@ module HHLO.EDSL.Ops
     , transpose
     -- * Reductions
     , reduceSum
+    , reduceSumDim
+    -- * Neural network layers
+    , softmax1D
+    , softmax2D
+    , conv2d
+    , batchNormInference
     -- * Constants
     , constant
     -- * Tuple
@@ -228,6 +234,123 @@ reduceSum (Tensor x) = do
     let dims = [0 .. fromIntegral (length (shapeVal (Proxy @s))) - 1]
     vid <- emitReduce x inType zeroVid outType dims "stablehlo.add" outType
     return (Tensor vid)
+
+-- | Sum elements over specific dimensions.
+--
+-- The caller must specify the output shape via type applications.
+-- Example: reduce a [batch, classes] tensor over dim 1 to get [batch]:
+-- @
+--   sumClasses <- reduceSumDim @'[batch, classes] @'[batch] [1] t
+-- @
+reduceSumDim :: forall sFrom sTo d.
+                (KnownShape sFrom, KnownShape sTo, KnownDType d)
+             => [Int] -> Tensor sFrom d -> Builder (Tensor sTo d)
+reduceSumDim dims (Tensor x) = do
+    let inType  = tensorType (Proxy @sFrom) (Proxy @d)
+        outType = tensorType (Proxy @sTo)   (Proxy @d)
+        scalarType = tensorType (Proxy @'[]) (Proxy @d)
+    -- The init value for stablehlo.reduce must be a scalar, even when the
+    -- result is non-scalar.  The scalar is used as the initial value for
+    -- each independent reduction.
+    zeroVid <- emitOp "stablehlo.constant" [] []
+        [AttrDenseElements [] (dtypeVal (Proxy @d)) [0.0]] scalarType
+    vid <- emitReduce x inType zeroVid scalarType dims "stablehlo.add" outType
+    return (Tensor vid)
+
+-- ---------------------------------------------------------------------------
+-- Neural network layers
+-- ---------------------------------------------------------------------------
+
+-- | Softmax over a 1-D tensor (no batch dimension).
+--
+-- @softmax(x)_i = exp(x_i) / sum_j(exp(x_j))@
+softmax1D :: forall n. KnownNat n => Tensor '[n] 'F32 -> Builder (Tensor '[n] 'F32)
+softmax1D x = do
+    ex  <- exponential x
+    sm  <- reduceSum @'[n] @'F32 ex
+    sm' <- broadcastWithDims @'[] @'[n] [] sm
+    divide ex sm'
+
+-- | Softmax over the last dimension of a 2-D tensor (batched).
+--
+-- Input shape @[batch, classes]@; each row is independently normalized.
+softmax2D :: forall batch classes.
+             (KnownNat batch, KnownNat classes)
+          => Tensor '[batch, classes] 'F32 -> Builder (Tensor '[batch, classes] 'F32)
+softmax2D x = do
+    ex  <- exponential x
+    sm  <- reduceSumDim @'[batch, classes] @'[batch] [1] ex
+    sm' <- broadcastWithDims @'[batch] @'[batch, classes] [0] sm
+    divide ex sm'
+
+-- | 2-D convolution (NHWC format).
+--
+-- * @input@ has shape @[batch, h, w, in_channels]@
+-- * @kernel@ has shape @[kernel_h, kernel_w, in_channels, out_channels]@
+-- * Result has shape @[batch, out_h, out_w, out_channels]@
+--
+-- Default settings: stride=1, padding=0, dilation=1, groups=1.
+conv2d :: forall batch h w inCh outCh kh kw oh ow.
+          ( KnownNat batch, KnownNat h, KnownNat w, KnownNat inCh, KnownNat outCh
+          , KnownNat kh, KnownNat kw, KnownNat oh, KnownNat ow )
+       => Tensor '[batch, h, w, inCh] 'F32
+       -> Tensor '[kh, kw, inCh, outCh] 'F32
+       -> Builder (Tensor '[batch, oh, ow, outCh] 'F32)
+conv2d (Tensor x) (Tensor k) = do
+    let inType1 = tensorType (Proxy @'[batch, h, w, inCh])   (Proxy @'F32)
+        inType2 = tensorType (Proxy @'[kh, kw, inCh, outCh]) (Proxy @'F32)
+        outType = tensorType (Proxy @'[batch, oh, ow, outCh]) (Proxy @'F32)
+        dimNums = "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]"
+        window  = "{pad = [[0, 0], [0, 0]]}"
+    vid <- emitOp "stablehlo.convolution" [x, k] [inType1, inType2]
+        [ AttrString "dim_numbers" dimNums
+        , AttrString "window" window
+        , AttrInt "batch_group_count" 1
+        , AttrInt "feature_group_count" 1
+        ] outType
+    return (Tensor vid)
+
+-- | Batch normalization for inference.
+--
+-- * @x@ has shape @[N, H, W, C]@ (NHWC)
+-- * @scale@, @offset@, @mean@, @variance@ each have shape @[C]@
+-- * Result has the same shape as @x@
+batchNormInference :: forall n h w c.
+                      (KnownNat n, KnownNat h, KnownNat w, KnownNat c)
+                   => Tensor '[n, h, w, c] 'F32
+                   -> Tensor '[c] 'F32   -- scale
+                   -> Tensor '[c] 'F32   -- offset
+                   -> Tensor '[c] 'F32   -- mean
+                   -> Tensor '[c] 'F32   -- variance
+                   -> Builder (Tensor '[n, h, w, c] 'F32)
+batchNormInference x scale offset mean variance = do
+    let chType = tensorType (Proxy @'[c]) (Proxy @'F32)
+
+    -- epsilon as scalar constant, broadcast to [c]
+    epsScalar <- constant @'[] @'F32 1.0e-5
+    epsCh     <- broadcastWithDims @'[] @'[c] [] epsScalar
+
+    -- varPlusEps = variance + epsilon
+    varPlusEps <- add variance epsCh
+
+    -- sqrtVar = sqrt(varPlusEps)
+    let (Tensor varPlusEpsVid) = varPlusEps
+    sqrtVarVid <- emitOp "stablehlo.sqrt" [varPlusEpsVid] [chType] [] chType
+    let sqrtVar = Tensor sqrtVarVid :: Tensor '[c] 'F32
+
+    -- Broadcast [c] params to [n,h,w,c] via dims=[3] (feature dim)
+    meanB    <- broadcastWithDims @'[c] @'[n, h, w, c] [3] mean
+    sqrtVarB <- broadcastWithDims @'[c] @'[n, h, w, c] [3] sqrtVar
+    scaleB   <- broadcastWithDims @'[c] @'[n, h, w, c] [3] scale
+    offsetB  <- broadcastWithDims @'[c] @'[n, h, w, c] [3] offset
+
+    -- y = scale * (x - mean) / sqrt(var + eps) + offset
+    xMinusMean <- sub x meanB
+    normalized <- divide xMinusMean sqrtVarB
+    scaled     <- multiply scaleB normalized
+    result     <- add scaled offsetB
+
+    return result
 
 -- ---------------------------------------------------------------------------
 -- Constants
