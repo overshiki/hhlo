@@ -7,6 +7,8 @@ module HHLO.IR.AST
     , TensorType(..)
     , Attribute(..)
     , Operation(..)
+    , Block(..)
+    , Region(..)
     , FuncArg(..)
     , Function(..)
     , Module(..)
@@ -48,12 +50,24 @@ data Attribute
     | AttrDict    [(Text, Attribute)]
     deriving (Eq, Show)
 
+-- | A block inside a region (e.g. the reducer body of 'stablehlo.reduce').
+data Block = Block
+    { blockArgs       :: ![FuncArg]
+    , blockOps        :: ![Operation]
+    }
+    deriving (Eq, Show)
+
+-- | A region attached to an operation.
+newtype Region = Region { unRegion :: [Block] }
+    deriving (Eq, Show)
+
 -- | A single StableHLO operation.
 data Operation = Operation
     { opName         :: !Text
     , opOperands     :: ![ValueId]
     , opOperandTypes :: ![TensorType]
     , opAttributes   :: ![Attribute]
+    , opRegions      :: ![Region]
     , opResult       :: !ValueId
     , opResultType   :: !TensorType
     }
@@ -67,11 +81,13 @@ data FuncArg = FuncArg
     deriving (Eq, Show)
 
 -- | A function definition inside a module.
+-- Supports multiple result types for tuple-returning functions.
 data Function = Function
-    { funcName   :: !Text
-    , funcArgs   :: ![FuncArg]
-    , funcResult :: !TensorType
-    , funcBody   :: ![Operation]
+    { funcName       :: !Text
+    , funcArgs       :: ![FuncArg]
+    , funcResults    :: ![TensorType]
+    , funcReturnVids :: ![ValueId]
+    , funcBody       :: ![Operation]
     }
     deriving (Eq, Show)
 

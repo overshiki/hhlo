@@ -289,9 +289,69 @@ PJRT_Error* hhlo_pjrt_buffer_destroy(PJRT_Api* api, PJRT_Buffer* buffer) {
     return api->PJRT_Buffer_Destroy(&args);
 }
 
+PJRT_Error* hhlo_pjrt_buffer_dimensions(PJRT_Api* api, PJRT_Buffer* buffer,
+                                         const int64_t** out_dims, size_t* out_num_dims) {
+    PJRT_Buffer_Dimensions_Args args = {0};
+    args.struct_size = PJRT_Buffer_Dimensions_Args_STRUCT_SIZE;
+    args.buffer = buffer;
+    PJRT_Error* err = api->PJRT_Buffer_Dimensions(&args);
+    if (err == NULL) {
+        *out_dims = args.dims;
+        *out_num_dims = args.num_dims;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_buffer_element_type(PJRT_Api* api, PJRT_Buffer* buffer, int* out_type) {
+    PJRT_Buffer_ElementType_Args args = {0};
+    args.struct_size = PJRT_Buffer_ElementType_Args_STRUCT_SIZE;
+    args.buffer = buffer;
+    PJRT_Error* err = api->PJRT_Buffer_ElementType(&args);
+    if (err == NULL) {
+        *out_type = (int) args.type;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_buffer_on_device_size(PJRT_Api* api, PJRT_Buffer* buffer, size_t* out_size) {
+    PJRT_Buffer_OnDeviceSizeInBytes_Args args = {0};
+    args.struct_size = PJRT_Buffer_OnDeviceSizeInBytes_Args_STRUCT_SIZE;
+    args.buffer = buffer;
+    PJRT_Error* err = api->PJRT_Buffer_OnDeviceSizeInBytes(&args);
+    if (err == NULL) {
+        *out_size = args.on_device_size_in_bytes;
+    }
+    return err;
+}
+
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_buffer_ready_event(PJRT_Api* api, PJRT_Buffer* buffer,
+                                                PJRT_Event** out_event) {
+    PJRT_Buffer_ReadyEvent_Args args = {0};
+    args.struct_size = PJRT_Buffer_ReadyEvent_Args_STRUCT_SIZE;
+    args.buffer = buffer;
+    args.event = NULL;
+
+    PJRT_Error* err = api->PJRT_Buffer_ReadyEvent(&args);
+    if (err == NULL) {
+        *out_event = args.event;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_event_is_ready(PJRT_Api* api, PJRT_Event* event, int* out_ready) {
+    PJRT_Event_IsReady_Args args = {0};
+    args.struct_size = PJRT_Event_IsReady_Args_STRUCT_SIZE;
+    args.event = event;
+    PJRT_Error* err = api->PJRT_Event_IsReady(&args);
+    if (err == NULL) {
+        *out_ready = args.is_ready ? 1 : 0;
+    }
+    return err;
+}
 
 PJRT_Error* hhlo_pjrt_event_await(PJRT_Api* api, PJRT_Event* event) {
     PJRT_Event_Await_Args args = {0};

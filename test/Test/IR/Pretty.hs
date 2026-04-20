@@ -20,9 +20,10 @@ tests = testGroup "Pretty"
                 [ FuncArg "arg0" (TensorType [2, 2] F32)
                 , FuncArg "arg1" (TensorType [2, 2] F32)
                 ]
-                (TensorType [2, 2] F32)
+                [TensorType [2, 2] F32]
+                [ValueId 2]
                 [ Operation "stablehlo.add" [ValueId 0, ValueId 1]
-                    [TensorType [2, 2] F32, TensorType [2, 2] F32] [] (ValueId 2) (TensorType [2, 2] F32)
+                    [TensorType [2, 2] F32, TensorType [2, 2] F32] [] [] (ValueId 2) (TensorType [2, 2] F32)
                 ]
         let expected =
                 "func.func @main(%arg0: tensor<2x2xf32>, %arg1: tensor<2x2xf32>) -> tensor<2x2xf32> {\n"

@@ -82,9 +82,27 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_to_host"
 foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_destroy"
     c_pjrtBufferDestroy :: Ptr PJRTApi -> Ptr PJRTBuffer -> IO (Ptr PJRTError)
 
+foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_dimensions"
+    c_pjrtBufferDimensions :: Ptr PJRTApi -> Ptr PJRTBuffer -> Ptr (Ptr Int64) -> Ptr CSize -> IO (Ptr PJRTError)
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_element_type"
+    c_pjrtBufferElementType :: Ptr PJRTApi -> Ptr PJRTBuffer -> Ptr CInt -> IO (Ptr PJRTError)
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_on_device_size"
+    c_pjrtBufferOnDeviceSize :: Ptr PJRTApi -> Ptr PJRTBuffer -> Ptr CSize -> IO (Ptr PJRTError)
+
 -- ---------------------------------------------------------------------------
 -- Events
 -- ---------------------------------------------------------------------------
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_ready_event"
+    c_pjrtBufferReadyEvent :: Ptr PJRTApi
+                           -> Ptr PJRTBuffer
+                           -> Ptr (Ptr PJRTEvent)
+                           -> IO (Ptr PJRTError)
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_event_is_ready"
+    c_pjrtEventIsReady :: Ptr PJRTApi -> Ptr PJRTEvent -> Ptr CInt -> IO (Ptr PJRTError)
 
 foreign import ccall "pjrt_shim.h hhlo_pjrt_event_await"
     c_pjrtEventAwait :: Ptr PJRTApi -> Ptr PJRTEvent -> IO (Ptr PJRTError)

@@ -5,6 +5,10 @@ module HHLO.Runtime.Buffer
     , fromDevice
     , toDeviceF32
     , fromDeviceF32
+    -- * Buffer metadata queries
+    , bufferDimensions
+    , bufferElementType
+    , bufferOnDeviceSize
     ) where
 
 import Data.Vector.Storable (Vector)
@@ -61,6 +65,35 @@ fromDevice api buf numElems = do
 -- | Convenience: read an F32 buffer back as a Float vector.
 fromDeviceF32 :: PJRTApi -> PJRTBuffer -> Int -> IO (Vector Float)
 fromDeviceF32 = fromDevice
+
+-- | Query the dimensions (shape) of a device buffer.
+-- Returns a list like @[batch, height, width, channels]@.
+bufferDimensions :: PJRTApi -> PJRTBuffer -> IO [Int64]
+bufferDimensions api buf = do
+    alloca $ \dimsPtrPtr -> do
+        alloca $ \numDimsPtr -> do
+            checkError (unApi api) $ do
+                c_pjrtBufferDimensions (unApi api) (unBuf buf) dimsPtrPtr numDimsPtr
+            numDims <- peek numDimsPtr
+            dimsPtr <- peek dimsPtrPtr
+            peekArray (fromIntegral numDims) dimsPtr
+
+-- | Query the element type of a device buffer.
+-- Returns the PJRT_Buffer_Type enum value (e.g. 11 for F32).
+bufferElementType :: PJRTApi -> PJRTBuffer -> IO CInt
+bufferElementType api buf =
+    alloca $ \typePtr -> do
+        checkError (unApi api) $ do
+            c_pjrtBufferElementType (unApi api) (unBuf buf) typePtr
+        peek typePtr
+
+-- | Query the on-device size of a buffer in bytes.
+bufferOnDeviceSize :: PJRTApi -> PJRTBuffer -> IO Int
+bufferOnDeviceSize api buf =
+    alloca $ \sizePtr -> do
+        checkError (unApi api) $ do
+            c_pjrtBufferOnDeviceSize (unApi api) (unBuf buf) sizePtr
+        fromIntegral <$> peek sizePtr
 
 unApi :: PJRTApi -> Ptr PJRTApi
 unApi (PJRTApi p) = p

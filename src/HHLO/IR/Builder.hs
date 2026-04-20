@@ -2,15 +2,24 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module HHLO.IR.Builder
     ( Builder
     , runBuilder
+    , runBuilder2
+    , runBuilderT
     , Tensor(..)
+    , Tuple2(..)
+    , Tuple(..)
+    , TupleBuilder(..)
     , emitOp
+    , emitReduce
     , arg
     , argNamed
     , moduleFromBuilder
+    , moduleFromBuilder2
+    , moduleFromBuilderT
     , tensorType
     , KnownDType(..)
     ) where
@@ -40,11 +49,37 @@ newtype Tensor (s :: Shape) (d :: DType) = Tensor
     }
     deriving (Eq, Show)
 
+-- | A pair of tensors for functions with two results.
+data Tuple2 (s1 :: Shape) (d1 :: DType) (s2 :: Shape) (d2 :: DType)
+    = Tuple2 (Tensor s1 d1) (Tensor s2 d2)
+    deriving (Eq, Show)
+
+-- | A heterogeneous tuple of tensors for multi-result functions.
+data Tuple (ss :: [Shape]) (ds :: [DType]) where
+    TNil  :: Tuple '[] '[]
+    (:::) :: Tensor s d -> Tuple ss ds -> Tuple (s ': ss) (d ': ds)
+
+infixr 5 :::
+
+-- | Type class for extracting 'ValueId's and 'TensorType's from a 'Tuple'.
+class TupleBuilder t where
+    tupleVids   :: t -> [ValueId]
+    tupleTypes  :: Proxy t -> [TensorType]
+
+instance TupleBuilder (Tuple '[] '[]) where
+    tupleVids TNil  = []
+    tupleTypes _    = []
+
+instance (KnownShape s, KnownDType d, TupleBuilder (Tuple ss ds))
+      => TupleBuilder (Tuple (s ': ss) (d ': ds)) where
+    tupleVids (t ::: ts) = tensorValue t : tupleVids ts
+    tupleTypes _ = tensorType (Proxy @s) (Proxy @d) : tupleTypes (Proxy @(Tuple ss ds))
+
 -- | Construct a 'TensorType' from type-level shape and dtype proxies.
 tensorType :: forall s d. (KnownShape s, KnownDType d) => Proxy s -> Proxy d -> TensorType
 tensorType _ _ = TensorType (shapeVal (Proxy @s)) (dtypeVal (Proxy @d))
 
--- | Run a 'Builder' action and produce a 'Function'.
+-- | Run a 'Builder' action and produce a single-result 'Function'.
 -- Argument 'ValueId's are negative: @-1@ maps to @%arg0@, @-2@ to @%arg1@, etc.
 -- Operation result IDs start at 0.
 runBuilder :: forall s d. (KnownShape s, KnownDType d) => Text -> [FuncArg] -> Builder (Tensor s d) -> Function
@@ -53,15 +88,52 @@ runBuilder name args' builderAction =
         initState = BuildState 0 [] 0
         (Tensor finalVid, finalState) = runState m initState
         resultType = tensorType (Proxy @s) (Proxy @d)
-    in Function name args' resultType (reverse $ bsOps finalState)
+        ops = reverse $ bsOps finalState
+    in Function name args' [resultType] [finalVid] ops
 
--- | Create a top-level 'Module' from a single function produced by a builder.
+-- | Run a 'Builder' action and produce a two-result 'Function'.
+runBuilder2 :: forall s1 d1 s2 d2. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2)
+            => Text -> [FuncArg] -> Builder (Tuple2 s1 d1 s2 d2) -> Function
+runBuilder2 name args' builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0
+        (Tuple2 (Tensor v1) (Tensor v2), finalState) = runState m initState
+        rt1 = tensorType (Proxy @s1) (Proxy @d1)
+        rt2 = tensorType (Proxy @s2) (Proxy @d2)
+        ops = reverse $ bsOps finalState
+    in Function name args' [rt1, rt2] [v1, v2] ops
+
+-- | Create a top-level 'Module' from a single-result function produced by a builder.
 -- Argument names are automatically set to @arg0@, @arg1@, etc. so that
 -- the signature and body SSA references line up.
 moduleFromBuilder :: forall s d. (KnownShape s, KnownDType d) => Text -> [FuncArg] -> Builder (Tensor s d) -> Module
 moduleFromBuilder name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
     in Module [runBuilder name renamed action]
+
+-- | Create a top-level 'Module' from a two-result function produced by a builder.
+moduleFromBuilder2 :: forall s1 d1 s2 d2. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2)
+                   => Text -> [FuncArg] -> Builder (Tuple2 s1 d1 s2 d2) -> Module
+moduleFromBuilder2 name args' action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+    in Module [runBuilder2 name renamed action]
+
+-- | Run a 'Builder' action and produce a multi-result 'Function' from a 'Tuple'.
+runBuilderT :: forall ss ds. TupleBuilder (Tuple ss ds) => Text -> [FuncArg] -> Builder (Tuple ss ds) -> Function
+runBuilderT name args' builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0
+        (tupleResult, finalState) = runState m initState
+        rtypes = tupleTypes (Proxy @(Tuple ss ds))
+        rvids  = tupleVids tupleResult
+        ops    = reverse $ bsOps finalState
+    in Function name args' rtypes rvids ops
+
+-- | Create a top-level 'Module' from a multi-result function produced by a builder.
+moduleFromBuilderT :: forall ss ds. TupleBuilder (Tuple ss ds) => Text -> [FuncArg] -> Builder (Tuple ss ds) -> Module
+moduleFromBuilderT name args' action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+    in Module [runBuilderT name renamed action]
 
 -- | Emit a generic operation into the builder.
 -- The caller must provide the operand types so that the pretty-printer
@@ -72,7 +144,33 @@ emitOp name operands operandTypes attrs resultType = do
     let vid = ValueId n
     modify $ \s -> s
         { bsNextId = n + 1
-        , bsOps = Operation name operands operandTypes attrs vid resultType : bsOps s
+        , bsOps = Operation name operands operandTypes attrs [] vid resultType : bsOps s
+        }
+    return vid
+
+-- | Emit a 'stablehlo.reduce' operation using the @applies@ shorthand.
+--
+-- Example (reduce sum over all dimensions):
+-- @
+--   vid <- emitReduce inputVid inputType initVid initType [0,1] "stablehlo.add" resultType
+-- @
+--
+-- Emits:
+-- @
+--   %n = stablehlo.reduce(%input init: %init) applies stablehlo.add
+--        across dimensions = [0, 1] : (input_type, init_type) -> result_type
+-- @
+emitReduce :: ValueId -> TensorType -> ValueId -> TensorType -> [Int] -> Text -> TensorType -> Builder ValueId
+emitReduce input inType init_ initType dims appliesOp resultType = do
+    n <- gets bsNextId
+    let vid = ValueId n
+    modify $ \s -> s
+        { bsNextId = n + 1
+        , bsOps = Operation "stablehlo.reduce"
+                    [input, init_] [inType, initType]
+                    [ AttrIntList "dimensions" (map fromIntegral dims)
+                    , AttrString "applies" appliesOp
+                    ] [] vid resultType : bsOps s
         }
     return vid
 

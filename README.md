@@ -12,7 +12,7 @@ HHLO is structured in four layers:
 
 ```
 ┌─────────────────────────────────────┐
-│  EDSL (HHLO.EDSL.Ops)               │  Type-safe frontend: add, matmul, etc.
+│  EDSL (HHLO.EDSL.Ops)               │  Type-safe frontend: add, matmul, relu, etc.
 ├─────────────────────────────────────┤
 │  IR Builder (HHLO.IR.Builder)       │  Stateful monad for constructing MLIR
 ├─────────────────────────────────────┤
@@ -33,6 +33,10 @@ PJRT buffers and executables are managed by `ForeignPtr` finalizers that automat
 **Dynamic Output Counts**
 
 The runtime queries the compiled executable for its actual number of outputs via `PJRT_Executable_NumOutputs` instead of guessing or hardcoding a maximum.
+
+**Async Execution**
+
+`HHLO.Runtime.Async` provides true non-blocking execution: `executeAsync` returns buffer handles immediately, `bufferReady` polls for completion, and `awaitBuffers` blocks until device-side computation finishes.
 
 ---
 
@@ -125,13 +129,18 @@ SUCCESS: Results match expected values!
 
 ### Running Examples
 
-Three standalone examples are provided in `examples/`:
+Four standalone examples are provided in `examples/`:
 
 | Example | Command | Description |
 |---------|---------|-------------|
 | Element-wise add | `cabal run example-add` | `c = a + b` on 2×2 matrices |
 | Matrix multiply | `cabal run example-matmul` | 2×3 @ 3×2 matmul |
 | Chained ops | `cabal run example-chain-ops` | `(a + b) * (a - b)` |
+| Async execution | `cabal run example-async` | `relu(a) + b` with `executeAsync` + `awaitBuffers` |
+| MLP forward pass | `cabal run example-mlp` | 2-layer MLP: `linear -> relu -> linear` |
+| Batched MLP | `cabal run example-mlp-batched` | Batched 2-layer MLP with `linearBatched` |
+| Reduction | `cabal run example-reduce` | `reduceSum` over all dimensions |
+| Tuple return | `cabal run example-tuple` | Multi-result `func.func` (MLIR print-only) |
 
 All examples must be run with `LD_LIBRARY_PATH` pointing to the PJRT plugins:
 
@@ -140,6 +149,11 @@ export LD_LIBRARY_PATH=deps/pjrt:$LD_LIBRARY_PATH
 cabal run example-add
 cabal run example-matmul
 cabal run example-chain-ops
+cabal run example-async
+cabal run example-mlp
+cabal run example-mlp-batched
+cabal run example-reduce
+cabal run example-tuple
 ```
 
 ---
@@ -183,7 +197,12 @@ All 4 tests passed (0.03s)
 ├── examples/               # Standalone example programs
 │   ├── 01-add.hs
 │   ├── 02-matmul.hs
-│   └── 03-chain-ops.hs
+│   ├── 03-chain-ops.hs
+│   ├── 04-async.hs
+│   ├── 05-mlp.hs
+│   ├── 06-mlp-batched.hs
+│   ├── 07-tuple.hs
+│   └── 08-reduce.hs
 ├── src/HHLO/
 │   ├── Core/Types.hs       # DType, Shape, HostType type families
 │   ├── IR/
@@ -198,7 +217,8 @@ All 4 tests passed (0.03s)
 │       │   └── Error.hs    # PJRT error handling
 │       ├── Compile.hs      # MLIR → PJRT executable
 │       ├── Execute.hs      # Synchronous execution
-│       └── Buffer.hs       # Host↔device buffer transfers
+│       ├── Async.hs        # Non-blocking execution with PJRT_Event
+│       └── Buffer.hs       # Host↔device buffer transfers + metadata queries
 ├── test/
 │   ├── Test/IR/Pretty.hs
 │   └── Test/Runtime/EndToEnd.hs

@@ -22,6 +22,7 @@ library
         HHLO.Runtime.PJRT.Error
         HHLO.Runtime.Compile
         HHLO.Runtime.Execute
+        HHLO.Runtime.Async
         HHLO.Runtime.Buffer
     build-depends:
         base          ^>= 4.18,
@@ -73,6 +74,61 @@ executable example-matmul
 executable example-chain-ops
     import:           warnings
     main-is:          03-chain-ops.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-async
+    import:           warnings
+    main-is:          04-async.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-mlp
+    import:           warnings
+    main-is:          05-mlp.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-mlp-batched
+    import:           warnings
+    main-is:          06-mlp-batched.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-tuple
+    import:           warnings
+    main-is:          07-tuple.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-reduce
+    import:           warnings
+    main-is:          08-reduce.hs
     build-depends:
         base,
         hhlo,
