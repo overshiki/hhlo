@@ -170,6 +170,94 @@ executable example-batch-norm
     hs-source-dirs:   examples
     default-language: GHC2021
 
+executable example-while
+    import:           warnings
+    main-is:          12-while.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-conditional
+    import:           warnings
+    main-is:          13-conditional.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-gather
+    import:           warnings
+    main-is:          14-gather.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-scatter
+    import:           warnings
+    main-is:          15-scatter.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-slice
+    import:           warnings
+    main-is:          16-slice.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-pad
+    import:           warnings
+    main-is:          17-pad.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-dynamic-slice
+    import:           warnings
+    main-is:          18-dynamic-slice.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-sort
+    import:           warnings
+    main-is:          19-sort.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
 test-suite hhlo-test
     import:           warnings
     type:             exitcode-stdio-1.0

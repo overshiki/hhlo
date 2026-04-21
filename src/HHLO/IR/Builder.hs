@@ -14,7 +14,10 @@ module HHLO.IR.Builder
     , Tuple(..)
     , TupleBuilder(..)
     , emitOp
+    , emitOpRegions
     , emitReduce
+    , emitReturn
+    , runBlockBuilder
     , arg
     , argNamed
     , moduleFromBuilder
@@ -139,14 +142,43 @@ moduleFromBuilderT name args' action =
 -- The caller must provide the operand types so that the pretty-printer
 -- can emit the full function type @(operandTypes) -> resultType@.
 emitOp :: Text -> [ValueId] -> [TensorType] -> [Attribute] -> TensorType -> Builder ValueId
-emitOp name operands operandTypes attrs resultType = do
+emitOp name operands operandTypes attrs resultType =
+    emitOpRegions name operands operandTypes attrs [] resultType
+
+-- | Emit an operation that carries nested regions.
+emitOpRegions :: Text -> [ValueId] -> [TensorType] -> [Attribute] -> [Region] -> TensorType -> Builder ValueId
+emitOpRegions name operands operandTypes attrs regions resultType = do
     n <- gets bsNextId
     let vid = ValueId n
     modify $ \s -> s
         { bsNextId = n + 1
-        , bsOps = Operation name operands operandTypes attrs [] vid resultType : bsOps s
+        , bsOps = Operation name operands operandTypes attrs regions vid resultType : bsOps s
         }
     return vid
+
+-- | Run a nested builder action to produce a single 'Block'.
+--
+-- * Shares 'bsNextId' with the parent so SSA value IDs remain globally unique.
+-- * Isolates 'bsOps' so inner ops do not leak into the parent's op list.
+-- * Resets 'bsArgCount' so 'arg' inside the block creates fresh negative IDs.
+runBlockBuilder :: [TensorType] -> Builder a -> Builder Block
+runBlockBuilder argTypes (Builder inner) = do
+    parent <- get
+    let startCount = bsArgCount parent
+        blockArgs = zipWith (\i t -> FuncArg (T.pack ("arg" ++ show i)) t) [startCount..] argTypes
+        innerState0 = BuildState (bsNextId parent) [] startCount
+        (_, innerState) = runState inner innerState0
+    put $ parent { bsNextId = bsNextId innerState }
+    return $ Block blockArgs (reverse $ bsOps innerState)
+
+-- | Emit a 'stablehlo.return' terminator inside a region.
+--
+-- The result type is a dummy scalar because 'return' has no operation results,
+-- but the pretty-printer special-cases this op anyway.
+emitReturn :: [ValueId] -> [TensorType] -> Builder ()
+emitReturn vids types = do
+    _ <- emitOp "stablehlo.return" vids types [] (TensorType [] F32)
+    return ()
 
 -- | Emit a 'stablehlo.reduce' operation using the @applies@ shorthand.
 --

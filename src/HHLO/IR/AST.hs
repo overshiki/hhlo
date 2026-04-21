@@ -48,6 +48,8 @@ data Attribute
     | AttrIntList Text [Int64]
     | AttrDenseElements [Integer] DType [Double]
     | AttrDict    [(Text, Attribute)]
+    | AttrRaw     Text           -- ^ Printed verbatim (no quotes).  Needed for
+                                 --   dialect attributes like @#stablehlo.gather<...>@.
     deriving (Eq, Show)
 
 -- | A block inside a region (e.g. the reducer body of 'stablehlo.reduce').

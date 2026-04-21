@@ -33,6 +33,19 @@ module HHLO.EDSL.Ops
     , softmax2D
     , conv2d
     , batchNormInference
+    -- * Control flow
+    , whileLoop
+    , conditional
+    , compare
+    , lessThan
+    -- * Data movement
+    , gather
+    , scatter
+    , slice
+    , pad
+    , dynamicSlice
+    , sort
+    , convert
     -- * Constants
     , constant
     -- * Tuple
@@ -42,10 +55,12 @@ module HHLO.EDSL.Ops
     , returnT
     ) where
 
-import Prelude hiding (subtract, negate, maximum, minimum, abs)
+import Prelude hiding (subtract, negate, maximum, minimum, abs, compare)
 
 import Data.Int (Int64)
 import Data.Proxy
+import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.TypeLits
 import HHLO.Core.Types
 import HHLO.IR.AST
@@ -377,3 +392,302 @@ returnTuple2 t1 t2 = return (Tuple2 t1 t2)
 -- | Return a heterogeneous tuple of tensors from a multi-result builder.
 returnT :: Tuple ss ds -> Builder (Tuple ss ds)
 returnT = return
+
+-- ---------------------------------------------------------------------------
+-- Control flow
+-- ---------------------------------------------------------------------------
+
+-- | Single-tensor while loop.
+--
+-- * @init@ is the initial loop-carried value.
+-- * @cond@ takes the loop variable and returns a boolean scalar.
+-- * @body@ takes the loop variable and returns the updated value.
+-- * Result has the same shape and dtype as @init@.
+whileLoop :: forall s d.
+             (KnownShape s, KnownDType d)
+          => Tensor s d
+          -> (Tensor s d -> Builder (Tensor '[] 'Bool))
+          -> (Tensor s d -> Builder (Tensor s d))
+          -> Builder (Tensor s d)
+whileLoop init cond body = do
+    let ttype     = tensorType (Proxy @s) (Proxy @d)
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+
+    -- Build cond region: ^bb0(%argN: ttype) -> tensor<i1>
+    condBlock <- runBlockBuilder [ttype] $ do
+        loopVar <- arg @s @d
+        condResult <- cond loopVar
+        emitReturn [tensorValue condResult] [boolType]
+
+    -- Build body region: ^bb0(%argN: ttype) -> ttype
+    bodyBlock <- runBlockBuilder [ttype] $ do
+        loopVar <- arg @s @d
+        bodyResult <- body loopVar
+        emitReturn [tensorValue bodyResult] [ttype]
+
+    let (Tensor initVid) = init
+    vid <- emitOpRegions "stablehlo.while" [initVid] [ttype] []
+            [Region [condBlock], Region [bodyBlock]] ttype
+    return (Tensor vid)
+
+-- | If-then-else selecting between two tensor values.
+--
+-- Both branches must return a tensor of the same shape and dtype.
+conditional :: forall s d.
+               (KnownShape s, KnownDType d)
+            => Tensor '[] 'Bool
+            -> Builder (Tensor s d)   -- true branch thunk
+            -> Builder (Tensor s d)   -- false branch thunk
+            -> Builder (Tensor s d)
+conditional pred trueThunk falseThunk = do
+    let ttype    = tensorType (Proxy @s) (Proxy @d)
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+
+    -- Build true region (no block args)
+    trueBlock <- runBlockBuilder [] $ do
+        trueResult <- trueThunk
+        emitReturn [tensorValue trueResult] [ttype]
+
+    -- Build false region (no block args)
+    falseBlock <- runBlockBuilder [] $ do
+        falseResult <- falseThunk
+        emitReturn [tensorValue falseResult] [ttype]
+
+    let (Tensor predVid) = pred
+    vid <- emitOpRegions "stablehlo.if" [predVid] [boolType] []
+            [Region [trueBlock], Region [falseBlock]] ttype
+    return (Tensor vid)
+
+-- | Element-wise comparison between two tensors.
+--
+-- @direction@ must be a valid StableHLO comparison direction:
+-- @"EQ"@, @"NE"@, @"GE"@, @"GT"@, @"LE"@, @"LT"@.
+compare :: forall s d.
+           (KnownShape s, KnownDType d)
+        => Tensor s d -> Tensor s d -> Text -> Builder (Tensor '[] 'Bool)
+compare (Tensor x) (Tensor y) direction = do
+    let inType  = tensorType (Proxy @s) (Proxy @d)
+        outType = tensorType (Proxy @'[]) (Proxy @'Bool)
+    vid <- emitOp "stablehlo.compare" [x, y] [inType, inType]
+        [ AttrString "comparison_direction" direction
+        ] outType
+    return (Tensor vid)
+
+-- | Convenience wrapper for 'compare' with @"LT"@ direction.
+lessThan :: forall s d.
+            (KnownShape s, KnownDType d)
+         => Tensor s d -> Tensor s d -> Builder (Tensor '[] 'Bool)
+lessThan x y = compare x y "LT"
+
+-- ---------------------------------------------------------------------------
+-- Data movement
+-- ---------------------------------------------------------------------------
+
+-- | Helper: format an integer list for MLIR attribute text.
+intList :: [Int64] -> Text
+intList xs = "[" <> T.intercalate ", " (map (T.pack . show) xs) <> "]"
+
+-- | Gather slices from a tensor using index arrays.
+--
+-- See the StableHLO 'gather' spec for the meaning of each attribute.
+gather :: forall sOperand sIndices sResult d.
+          ( KnownShape sOperand, KnownShape sIndices
+          , KnownShape sResult, KnownDType d )
+       => Tensor sOperand d
+       -> Tensor sIndices 'I64
+       -> [Int64]   -- ^ offset_dims
+       -> [Int64]   -- ^ collapsed_slice_dims
+       -> [Int64]   -- ^ start_index_map
+       -> Int64     -- ^ index_vector_dim
+       -> [Int64]   -- ^ slice_sizes
+       -> Builder (Tensor sResult d)
+gather operand indices offsetDims collapsedSliceDims startIndexMap indexVectorDim sliceSizes = do
+    let operandType = tensorType (Proxy @sOperand) (Proxy @d)
+        indicesType = tensorType (Proxy @sIndices)  (Proxy @'I64)
+        resultType  = tensorType (Proxy @sResult)   (Proxy @d)
+
+    let dimNumbers = AttrRaw $
+            "dimension_numbers = #stablehlo.gather<offset_dims = " <> intList offsetDims
+            <> ", collapsed_slice_dims = " <> intList collapsedSliceDims
+            <> ", start_index_map = " <> intList startIndexMap
+            <> ", index_vector_dim = " <> T.pack (show indexVectorDim)
+            <> ">"
+        sliceSizesAttr = AttrRaw $
+            "slice_sizes = array<i64: " <> T.intercalate ", " (map (T.pack . show) sliceSizes) <> ">"
+        indicesSorted = AttrBool "indices_are_sorted" False
+
+    let (Tensor operandVid) = operand
+        (Tensor indicesVid) = indices
+
+    vid <- emitOp "stablehlo.gather" [operandVid, indicesVid]
+            [operandType, indicesType]
+            [dimNumbers, sliceSizesAttr, indicesSorted]
+            resultType
+    return (Tensor vid)
+
+-- | Scatter updates into a tensor at indexed positions.
+--
+-- The @updateFn@ takes two scalar tensors (current value, update value)
+-- and returns the combined scalar.  Common choices:
+--
+-- * Identity (replace): @\_ upd -> return upd@
+-- * Add (accumulate):   @\cur upd -> add cur upd@
+scatter :: forall sInput sIndices sUpdates sResult d.
+           ( KnownShape sInput, KnownShape sIndices
+           , KnownShape sUpdates, KnownShape sResult
+           , KnownDType d )
+        => Tensor sInput d
+        -> Tensor sIndices 'I64
+        -> Tensor sUpdates d
+        -> (Tensor '[] d -> Tensor '[] d -> Builder (Tensor '[] d))
+        -> [Int64]   -- ^ update_window_dims
+        -> [Int64]   -- ^ inserted_window_dims
+        -> [Int64]   -- ^ scatter_dims_to_operand_dims
+        -> Int64     -- ^ index_vector_dim
+        -> Builder (Tensor sResult d)
+scatter input indices updates updateFn updateWindowDims insertedWindowDims scatterDimsToOperandDims indexVectorDim = do
+    let inputType   = tensorType (Proxy @sInput)   (Proxy @d)
+        indicesType = tensorType (Proxy @sIndices)  (Proxy @'I64)
+        updatesType = tensorType (Proxy @sUpdates)  (Proxy @d)
+        resultType  = tensorType (Proxy @sResult)   (Proxy @d)
+        elemType    = tensorType (Proxy @'[])       (Proxy @d)
+
+    -- Build update_computation region
+    updateBlock <- runBlockBuilder [elemType, elemType] $ do
+        cur <- arg @'[] @d
+        upd <- arg @'[] @d
+        combined <- updateFn cur upd
+        emitReturn [tensorValue combined] [elemType]
+
+    let dimNumbers = AttrRaw $
+            "scatter_dimension_numbers = #stablehlo.scatter<update_window_dims = " <> intList updateWindowDims
+            <> ", inserted_window_dims = " <> intList insertedWindowDims
+            <> ", scatter_dims_to_operand_dims = " <> intList scatterDimsToOperandDims
+            <> ", index_vector_dim = " <> T.pack (show indexVectorDim)
+            <> ">"
+        indicesSorted = AttrBool "indices_are_sorted" False
+        uniqueIndices = AttrBool "unique_indices" False
+
+    let (Tensor inputVid)   = input
+        (Tensor indicesVid) = indices
+        (Tensor updatesVid) = updates
+
+    vid <- emitOpRegions "stablehlo.scatter"
+            [inputVid, indicesVid, updatesVid]
+            [inputType, indicesType, updatesType]
+            [dimNumbers, indicesSorted, uniqueIndices]
+            [Region [updateBlock]]
+            resultType
+    return (Tensor vid)
+
+-- | Extract a sub-array from a tensor using statically-computed indices.
+--
+-- @start@, @limit@, and @stride@ must have the same length as the rank of
+-- the input tensor.
+slice :: forall sIn sOut d.
+         (KnownShape sIn, KnownShape sOut, KnownDType d)
+      => Tensor sIn d
+      -> [Int64]   -- ^ start_indices
+      -> [Int64]   -- ^ limit_indices
+      -> [Int64]   -- ^ strides
+      -> Builder (Tensor sOut d)
+slice operand start limit stride = do
+    let inType   = tensorType (Proxy @sIn)  (Proxy @d)
+        outType  = tensorType (Proxy @sOut) (Proxy @d)
+        startAttr = AttrRaw $ "start_indices = array<i64: " <> T.intercalate ", " (map (T.pack . show) start) <> ">"
+        limitAttr = AttrRaw $ "limit_indices = array<i64: " <> T.intercalate ", " (map (T.pack . show) limit) <> ">"
+        strideAttr = AttrRaw $ "strides = array<i64: " <> T.intercalate ", " (map (T.pack . show) stride) <> ">"
+
+    let (Tensor operandVid) = operand
+    vid <- emitOp "stablehlo.slice" [operandVid] [inType]
+            [startAttr, limitAttr, strideAttr] outType
+    return (Tensor vid)
+
+-- | Pad a tensor with a padding value.
+--
+-- @low@, @high@, and @interior@ must have the same length as the rank of
+-- the input tensor.
+pad :: forall sIn sOut d.
+       (KnownShape sIn, KnownShape sOut, KnownDType d)
+    => Tensor sIn d
+    -> Tensor '[] d   -- ^ padding value (scalar)
+    -> [Int64]        -- ^ edge_padding_low
+    -> [Int64]        -- ^ edge_padding_high
+    -> [Int64]        -- ^ interior_padding
+    -> Builder (Tensor sOut d)
+pad operand paddingValue low high interior = do
+    let inType   = tensorType (Proxy @sIn)  (Proxy @d)
+        padType  = tensorType (Proxy @'[])  (Proxy @d)
+        outType  = tensorType (Proxy @sOut) (Proxy @d)
+        lowAttr  = AttrRaw $ "edge_padding_low = array<i64: " <> T.intercalate ", " (map (T.pack . show) low) <> ">"
+        highAttr = AttrRaw $ "edge_padding_high = array<i64: " <> T.intercalate ", " (map (T.pack . show) high) <> ">"
+        intAttr  = AttrRaw $ "interior_padding = array<i64: " <> T.intercalate ", " (map (T.pack . show) interior) <> ">"
+
+    let (Tensor operandVid) = operand
+        (Tensor padVid)     = paddingValue
+    vid <- emitOp "stablehlo.pad" [operandVid, padVid] [inType, padType]
+            [lowAttr, highAttr, intAttr] outType
+    return (Tensor vid)
+
+-- | Extract a slice from a tensor using dynamically-computed start indices.
+dynamicSlice :: forall sIn sOut d.
+                (KnownShape sIn, KnownShape sOut, KnownDType d)
+             => Tensor sIn d
+             -> [Tensor '[] 'I64]   -- ^ start indices (one scalar i64 per dimension)
+             -> [Int64]             -- ^ slice_sizes
+             -> Builder (Tensor sOut d)
+dynamicSlice operand startIndices sliceSizes = do
+    let inType   = tensorType (Proxy @sIn)  (Proxy @d)
+        outType  = tensorType (Proxy @sOut) (Proxy @d)
+        sizesAttr = AttrRaw $ "slice_sizes = array<i64: " <> T.intercalate ", " (map (T.pack . show) sliceSizes) <> ">"
+
+    let (Tensor operandVid) = operand
+        startVids = map tensorValue startIndices
+        startTypes = replicate (length startIndices) (tensorType (Proxy @'[]) (Proxy @'I64))
+
+    vid <- emitOp "stablehlo.dynamic_slice" (operandVid : startVids) (inType : startTypes)
+            [sizesAttr] outType
+    return (Tensor vid)
+
+-- | Sort a tensor along a given dimension.
+--
+-- The @comparator@ takes two scalar elements and returns a boolean scalar
+-- (true if the first should come before the second).
+sort :: forall s d.
+        (KnownShape s, KnownDType d)
+     => Tensor s d
+     -> Int64   -- ^ dimension to sort along
+     -> Bool    -- ^ is_stable
+     -> (Tensor '[] d -> Tensor '[] d -> Builder (Tensor '[] 'Bool))
+     -> Builder (Tensor s d)
+sort operand dimension isStable comparator = do
+    let inType  = tensorType (Proxy @s) (Proxy @d)
+        elemType = tensorType (Proxy @'[]) (Proxy @d)
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+
+    -- Build comparator region
+    compBlock <- runBlockBuilder [elemType, elemType] $ do
+        a <- arg @'[] @d
+        b <- arg @'[] @d
+        result <- comparator a b
+        emitReturn [tensorValue result] [boolType]
+
+    let dimAttr    = AttrInt "dimension" (fromIntegral dimension)
+        stableAttr = AttrBool "is_stable" isStable
+
+    let (Tensor operandVid) = operand
+    vid <- emitOpRegions "stablehlo.sort" [operandVid] [inType]
+            [dimAttr, stableAttr]
+            [Region [compBlock]]
+            inType
+    return (Tensor vid)
+
+-- | Convert a tensor from one element type to another.
+convert :: forall s dIn dOut.
+           (KnownShape s, KnownDType dIn, KnownDType dOut)
+        => Tensor s dIn -> Builder (Tensor s dOut)
+convert (Tensor x) = do
+    let inType  = tensorType (Proxy @s) (Proxy @dIn)
+        outType = tensorType (Proxy @s) (Proxy @dOut)
+    vid <- emitOp "stablehlo.convert" [x] [inType] [] outType
+    return (Tensor vid)

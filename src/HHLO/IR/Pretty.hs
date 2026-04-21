@@ -87,14 +87,80 @@ instance Pretty Operation where
         <> prettyBNAttrs attrs
         <> " : " <> prettyResultType operandTypes resultType
         <> mconcat (map prettyRegion regions)
-    pretty (Operation name operands operandTypes attrs regions result resultType) =
-        -- stablehlo.return has no result value
-        (if name == "stablehlo.return" then mempty else valueRefBuilder result <> " = ")
-        <> fromText name
-        <> (if null operands then mempty else " " <> mconcat (intersperse (fromText ", ") (map valueRefBuilder operands)))
-        <> prettyAttrsForOp name attrs
+    pretty (Operation "stablehlo.gather" operands operandTypes attrs regions result resultType) =
+        -- Generic form (no custom assembly in this parser version).
+        valueRefBuilder result <> " = \"stablehlo.gather\"("
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+        <> (if null regions then mempty else mconcat (map prettyRegion regions))
+        <> (if null attrs then mempty else " " <> prettyAttrs attrs)
         <> " : " <> prettyResultType operandTypes resultType
-        <> mconcat (map prettyRegion regions)
+    pretty (Operation "stablehlo.compare" operands operandTypes attrs regions result resultType) =
+        -- Custom form: stablehlo.compare %lhs, %rhs, "LT" : (t1, t2) -> t3
+        let direction = lookupAttrString "comparison_direction" attrs
+            restAttrs = filter (not . isCompareDirAttr) attrs
+        in valueRefBuilder result <> " = stablehlo.compare "
+           <> valueRefBuilder (operands !! 0) <> ", " <> valueRefBuilder (operands !! 1)
+           <> ", \"" <> fromText direction <> "\""
+           <> (if null regions then mempty else mconcat (map prettyRegion regions))
+           <> (if null restAttrs then mempty else " " <> prettyAttrs restAttrs)
+           <> " : " <> prettyResultType operandTypes resultType
+      where
+        isCompareDirAttr (AttrString "comparison_direction" _) = True
+        isCompareDirAttr _ = False
+    pretty (Operation "stablehlo.slice" operands operandTypes attrs regions result resultType) =
+        -- Generic form to maximise parser compatibility.
+        valueRefBuilder result <> " = \"stablehlo.slice\"("
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+        <> (if null regions then mempty else mconcat (map prettyRegion regions))
+        <> (if null attrs then mempty else " " <> prettyAttrs attrs)
+        <> " : " <> prettyResultType operandTypes resultType
+    pretty (Operation "stablehlo.pad" operands operandTypes attrs regions result resultType) =
+        -- Generic form to maximise parser compatibility.
+        valueRefBuilder result <> " = \"stablehlo.pad\"("
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+        <> (if null regions then mempty else mconcat (map prettyRegion regions))
+        <> (if null attrs then mempty else " " <> prettyAttrs attrs)
+        <> " : " <> prettyResultType operandTypes resultType
+    pretty (Operation "stablehlo.dynamic_slice" operands operandTypes attrs regions result resultType) =
+        -- Generic form to maximise parser compatibility.
+        valueRefBuilder result <> " = \"stablehlo.dynamic_slice\"("
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+        <> (if null regions then mempty else mconcat (map prettyRegion regions))
+        <> (if null attrs then mempty else " " <> prettyAttrs attrs)
+        <> " : " <> prettyResultType operandTypes resultType
+    pretty (Operation "stablehlo.sort" operands operandTypes attrs regions result resultType) =
+        -- Generic form (has regions; fallback would already use generic, but explicit is clearer).
+        valueRefBuilder result <> " = \"stablehlo.sort\"("
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+        <> (if null regions then mempty else mconcat (map prettyRegion regions))
+        <> (if null attrs then mempty else " " <> prettyAttrs attrs)
+        <> " : " <> prettyResultType operandTypes resultType
+    pretty (Operation "stablehlo.return" operands operandTypes _ regions _ _) =
+        -- Generic form for the region terminator.
+        "\"stablehlo.return\"("
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands))
+        <> ")"
+        <> (if null regions then mempty else mconcat (map prettyRegion regions))
+        <> " : "
+        <> (if null operandTypes
+            then "()"
+            else "(" <> mconcat (intersperse (", ") (map pretty operandTypes)) <> ")")
+        <> " -> ()"
+    pretty (Operation name operands operandTypes attrs regions result resultType) =
+        if null regions
+        then
+            -- Existing custom-ish form for ops without regions.
+            valueRefBuilder result <> " = " <> fromText name
+            <> (if null operands then mempty else " " <> mconcat (intersperse (fromText ", ") (map valueRefBuilder operands)))
+            <> prettyAttrsForOp name attrs
+            <> " : " <> prettyResultType operandTypes resultType
+        else
+            -- Generic assembly form for ops with regions (maximises parser compatibility).
+            valueRefBuilder result <> " = \"" <> fromText name <> "\""
+            <> "(" <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+            <> " (" <> mconcat (intersperse (", ") (map prettyRegion regions)) <> ")"
+            <> (if null attrs then mempty else " " <> prettyAttrs attrs)
+            <> " : " <> prettyResultType operandTypes resultType
 
 -- | Pretty-print operation attributes.
 -- For 'stablehlo.constant' with a single 'AttrDenseElements' we print the
@@ -207,19 +273,21 @@ prettyAttr (AttrDict pairs) =
     mconcat (intersperse (", ") (map prettyDictPair pairs))
   where
     prettyDictPair (k, v) = fromText k <> " = " <> prettyAttr v
+prettyAttr (AttrRaw t) =
+    fromText t
 
 prettyRegion :: Region -> Builder
 prettyRegion (Region blocks) =
-    " (" <> mconcat (map prettyBlock blocks) <> ")"
-
-prettyBlock :: Block -> Builder
-prettyBlock (Block args ops) =
     "{\n"
-    <> "  ^bb0"
+    <> mconcat (zipWith prettyBlock [0..] blocks)
+    <> "  }"
+
+prettyBlock :: Int -> Block -> Builder
+prettyBlock idx (Block args ops) =
+    "  ^bb" <> fromText (T.pack (show idx))
     <> (if null args then mempty else "(" <> mconcat (intersperse (", ") (map pretty args)) <> ")")
     <> ":\n"
-    <> mconcat (map ((<> "\n") . ("    " <>)) (map pretty ops))
-    <> "  }"
+    <> mconcat (map (\op -> "    " <> pretty op <> "\n") ops)
 
 intersperse :: Builder -> [Builder] -> [Builder]
 intersperse _   []     = []
