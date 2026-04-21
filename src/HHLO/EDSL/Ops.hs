@@ -10,6 +10,7 @@ module HHLO.EDSL.Ops
     , multiply
     , divide
     , matmul
+    , dotGeneral
     , linear
     , linearBatched
     -- * Unary element-wise ops
@@ -18,6 +19,8 @@ module HHLO.EDSL.Ops
     , abs'
     , exponential
     , logarithm
+    , tanh
+    , erf
     -- * Binary element-wise ops
     , maximum
     , minimum
@@ -25,14 +28,27 @@ module HHLO.EDSL.Ops
     , reshape
     , broadcastWithDims
     , transpose
+    , concatenate
+    , concatenate2
+    , iota
     -- * Reductions
     , reduceSum
     , reduceSumDim
+    , reduceWindow
+    , maxPool
+    , avgPool
     -- * Neural network layers
     , softmax1D
     , softmax2D
+    , softmax3D
+    , softmax4D
     , conv2d
+    , conv2dWithPadding
+    , transposeConvolution
     , batchNormInference
+    , layerNorm
+    , globalAvgPool
+    , gelu
     -- * Control flow
     , whileLoop
     , conditional
@@ -46,6 +62,10 @@ module HHLO.EDSL.Ops
     , dynamicSlice
     , sort
     , convert
+    -- * Selection
+    , select
+    -- * Map
+    , map
     -- * Constants
     , constant
     -- * Tuple
@@ -55,7 +75,7 @@ module HHLO.EDSL.Ops
     , returnT
     ) where
 
-import Prelude hiding (subtract, negate, maximum, minimum, abs, compare)
+import Prelude hiding (subtract, negate, maximum, minimum, abs, compare, map, tanh)
 
 import Data.Int (Int64)
 import Data.Proxy
@@ -120,6 +140,9 @@ type family MatMulShape (a :: Shape) (b :: Shape) :: Shape where
     MatMulShape '[m, k] '[k, n] = '[m, n]
     MatMulShape '[k]    '[k, n] = '[n]
     MatMulShape '[m, k] '[k]    = '[m]
+    MatMulShape '[batch, m, k] '[k, n] = '[batch, m, n]
+    MatMulShape '[b, m, k] '[b, k, n] = '[b, m, n]
+    MatMulShape '[b1, b2, m, k] '[b1, b2, k, n] = '[b1, b2, m, n]
 
 matmul :: forall s1 s2 d. (KnownShape s1, KnownShape s2, KnownShape (MatMulShape s1 s2), KnownDType d)
        => Tensor s1 d -> Tensor s2 d -> Builder (Tensor (MatMulShape s1 s2) d)
@@ -128,6 +151,29 @@ matmul (Tensor x) (Tensor y) = do
         inType2 = tensorType (Proxy @s2) (Proxy @d)
         outType = tensorType (Proxy @(MatMulShape s1 s2)) (Proxy @d)
     vid <- emitOp "stablehlo.dot" [x, y] [inType1, inType2] [] outType
+    return (Tensor vid)
+
+-- | General dot product with explicit batch and contracting dimensions.
+-- Use this for batched matrix multiplication (rank > 2).
+dotGeneral :: forall s1 s2 sOut d.
+              (KnownShape s1, KnownShape s2, KnownShape sOut, KnownDType d)
+           => [Int64]   -- ^ lhs batch dims
+           -> [Int64]   -- ^ rhs batch dims
+           -> [Int64]   -- ^ lhs contracting dims
+           -> [Int64]   -- ^ rhs contracting dims
+           -> Tensor s1 d
+           -> Tensor s2 d
+           -> Builder (Tensor sOut d)
+dotGeneral lhsBatch rhsBatch lhsContract rhsContract (Tensor x) (Tensor y) = do
+    let inType1 = tensorType (Proxy @s1) (Proxy @d)
+        inType2 = tensorType (Proxy @s2) (Proxy @d)
+        outType = tensorType (Proxy @sOut) (Proxy @d)
+        batchAttr      = AttrString "batching_dims" ("[" <> T.intercalate ", " (fmap (T.pack . show) lhsBatch) <> "] x [" <> T.intercalate ", " (fmap (T.pack . show) rhsBatch) <> "]")
+        contractingAttr = AttrString "contracting_dims" ("[" <> T.intercalate ", " (fmap (T.pack . show) lhsContract) <> "] x [" <> T.intercalate ", " (fmap (T.pack . show) rhsContract) <> "]")
+    vid <- emitOp "stablehlo.dot_general" [x, y] [inType1, inType2]
+            [ batchAttr
+            , contractingAttr
+            ] outType
     return (Tensor vid)
 
 -- | A linear (fully-connected) layer: @matmul x w + b@.
@@ -220,14 +266,31 @@ broadcastWithDims dims (Tensor x) = do
     let inType = tensorType (Proxy @sFrom) (Proxy @d)
         outType = tensorType (Proxy @sTo) (Proxy @d)
     vid <- emitOp "stablehlo.broadcast_in_dim" [x] [inType]
-        [AttrIntList "dims" (map fromIntegral dims)] outType
+        [AttrIntList "dims" (fromIntegral <$> dims)] outType
     return (Tensor vid)
 
 -- | Transpose a tensor by permuting dimensions.
-transpose :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
-transpose (Tensor x) = do
+--
+-- @perm@ must be a permutation of @[0 .. rank-1]@.
+transpose :: forall sIn sOut d. (KnownShape sIn, KnownShape sOut, KnownDType d)
+          => [Int64] -> Tensor sIn d -> Builder (Tensor sOut d)
+transpose perm (Tensor x) = do
+    let inType  = tensorType (Proxy @sIn)  (Proxy @d)
+        outType = tensorType (Proxy @sOut) (Proxy @d)
+        permAttr = AttrIntList "permutation" perm
+    vid <- emitOp "stablehlo.transpose" [x] [inType] [permAttr] outType
+    return (Tensor vid)
+
+tanh :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+tanh (Tensor x) = do
     let ttype = tensorType (Proxy @s) (Proxy @d)
-    vid <- emitOp "stablehlo.transpose" [x] [ttype] [] ttype
+    vid <- emitOp "stablehlo.tanh" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+erf :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+erf (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.erf" [x] [ttype] [] ttype
     return (Tensor vid)
 
 -- ---------------------------------------------------------------------------
@@ -298,6 +361,26 @@ softmax2D x = do
     sm' <- broadcastWithDims @'[batch] @'[batch, classes] [0] sm
     divide ex sm'
 
+-- | Softmax over the last dimension of a 3-D tensor.
+softmax3D :: forall a b c.
+             (KnownNat a, KnownNat b, KnownNat c)
+          => Tensor '[a, b, c] 'F32 -> Builder (Tensor '[a, b, c] 'F32)
+softmax3D x = do
+    ex  <- exponential x
+    sm  <- reduceSumDim @'[a, b, c] @'[a, b] [2] ex
+    sm' <- broadcastWithDims @'[a, b] @'[a, b, c] [0, 1] sm
+    divide ex sm'
+
+-- | Softmax over the last dimension of a 4-D tensor.
+softmax4D :: forall a b c d.
+             (KnownNat a, KnownNat b, KnownNat c, KnownNat d)
+          => Tensor '[a, b, c, d] 'F32 -> Builder (Tensor '[a, b, c, d] 'F32)
+softmax4D x = do
+    ex  <- exponential x
+    sm  <- reduceSumDim @'[a, b, c, d] @'[a, b, c] [3] ex
+    sm' <- broadcastWithDims @'[a, b, c] @'[a, b, c, d] [0, 1, 2] sm
+    divide ex sm'
+
 -- | 2-D convolution (NHWC format).
 --
 -- * @input@ has shape @[batch, h, w, in_channels]@
@@ -311,19 +394,43 @@ conv2d :: forall batch h w inCh outCh kh kw oh ow.
        => Tensor '[batch, h, w, inCh] 'F32
        -> Tensor '[kh, kw, inCh, outCh] 'F32
        -> Builder (Tensor '[batch, oh, ow, outCh] 'F32)
-conv2d (Tensor x) (Tensor k) = do
+conv2d x k = conv2dWithPadding @batch @h @w @inCh @outCh @kh @kw @oh @ow [1, 1] (replicate 2 [0, 0]) x k
+
+-- | 2-D convolution with explicit stride and padding (NHWC format).
+--
+-- * @input@ has shape @[batch, h, w, in_channels]@
+-- * @kernel@ has shape @[kernel_h, kernel_w, in_channels, out_channels]@
+-- * @strides@ is @[stride_h, stride_w]@
+-- * @padding@ is @[[pad_top, pad_bottom], [pad_left, pad_right]]@
+-- * Result has shape @[batch, out_h, out_w, out_channels]@
+conv2dWithPadding :: forall batch h w inCh outCh kh kw oh ow.
+                     ( KnownNat batch, KnownNat h, KnownNat w, KnownNat inCh, KnownNat outCh
+                     , KnownNat kh, KnownNat kw, KnownNat oh, KnownNat ow )
+                  => [Int64]        -- ^ strides [sh, sw]
+                  -> [[Int64]]      -- ^ padding [[pt, pb], [pl, pr]]
+                  -> Tensor '[batch, h, w, inCh] 'F32
+                  -> Tensor '[kh, kw, inCh, outCh] 'F32
+                  -> Builder (Tensor '[batch, oh, ow, outCh] 'F32)
+conv2dWithPadding strides padding input kernel = do
     let inType1 = tensorType (Proxy @'[batch, h, w, inCh])   (Proxy @'F32)
         inType2 = tensorType (Proxy @'[kh, kw, inCh, outCh]) (Proxy @'F32)
         outType = tensorType (Proxy @'[batch, oh, ow, outCh]) (Proxy @'F32)
         dimNums = "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]"
-        window  = "{pad = [[0, 0], [0, 0]]}"
-    vid <- emitOp "stablehlo.convolution" [x, k] [inType1, inType2]
-        [ AttrString "dim_numbers" dimNums
-        , AttrString "window" window
-        , AttrInt "batch_group_count" 1
-        , AttrInt "feature_group_count" 1
-        ] outType
+        strideStr = "[" <> T.intercalate ", " ((T.pack . show) <$> strides) <> "]"
+        padStr = "[" <> T.intercalate ", " (padPair <$> padding) <> "]"
+        window  = "{stride = " <> strideStr <> ", pad = " <> padStr <> "}"
+    vid <- emitOp "stablehlo.convolution"
+            [tensorValue input, tensorValue kernel]
+            [inType1, inType2]
+            [ AttrString "dim_numbers" dimNums
+            , AttrString "window" window
+            , AttrInt "batch_group_count" 1
+            , AttrInt "feature_group_count" 1
+            ] outType
     return (Tensor vid)
+  where
+    padPair [l, h] = "[" <> T.pack (show l) <> ", " <> T.pack (show h) <> "]"
+    padPair _      = error "conv2dWithPadding: padding must be [[low,high], ...]"
 
 -- | Batch normalization for inference.
 --
@@ -485,7 +592,7 @@ lessThan x y = compare x y "LT"
 
 -- | Helper: format an integer list for MLIR attribute text.
 intList :: [Int64] -> Text
-intList xs = "[" <> T.intercalate ", " (map (T.pack . show) xs) <> "]"
+intList xs = "[" <> T.intercalate ", " ((T.pack . show) <$> xs) <> "]"
 
 -- | Gather slices from a tensor using index arrays.
 --
@@ -513,7 +620,7 @@ gather operand indices offsetDims collapsedSliceDims startIndexMap indexVectorDi
             <> ", index_vector_dim = " <> T.pack (show indexVectorDim)
             <> ">"
         sliceSizesAttr = AttrRaw $
-            "slice_sizes = array<i64: " <> T.intercalate ", " (map (T.pack . show) sliceSizes) <> ">"
+            "slice_sizes = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> sliceSizes) <> ">"
         indicesSorted = AttrBool "indices_are_sorted" False
 
     let (Tensor operandVid) = operand
@@ -594,9 +701,9 @@ slice :: forall sIn sOut d.
 slice operand start limit stride = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        startAttr = AttrRaw $ "start_indices = array<i64: " <> T.intercalate ", " (map (T.pack . show) start) <> ">"
-        limitAttr = AttrRaw $ "limit_indices = array<i64: " <> T.intercalate ", " (map (T.pack . show) limit) <> ">"
-        strideAttr = AttrRaw $ "strides = array<i64: " <> T.intercalate ", " (map (T.pack . show) stride) <> ">"
+        startAttr = AttrRaw $ "start_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> start) <> ">"
+        limitAttr = AttrRaw $ "limit_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> limit) <> ">"
+        strideAttr = AttrRaw $ "strides = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> stride) <> ">"
 
     let (Tensor operandVid) = operand
     vid <- emitOp "stablehlo.slice" [operandVid] [inType]
@@ -619,9 +726,9 @@ pad operand paddingValue low high interior = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         padType  = tensorType (Proxy @'[])  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        lowAttr  = AttrRaw $ "edge_padding_low = array<i64: " <> T.intercalate ", " (map (T.pack . show) low) <> ">"
-        highAttr = AttrRaw $ "edge_padding_high = array<i64: " <> T.intercalate ", " (map (T.pack . show) high) <> ">"
-        intAttr  = AttrRaw $ "interior_padding = array<i64: " <> T.intercalate ", " (map (T.pack . show) interior) <> ">"
+        lowAttr  = AttrRaw $ "edge_padding_low = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> low) <> ">"
+        highAttr = AttrRaw $ "edge_padding_high = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> high) <> ">"
+        intAttr  = AttrRaw $ "interior_padding = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> interior) <> ">"
 
     let (Tensor operandVid) = operand
         (Tensor padVid)     = paddingValue
@@ -639,10 +746,10 @@ dynamicSlice :: forall sIn sOut d.
 dynamicSlice operand startIndices sliceSizes = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        sizesAttr = AttrRaw $ "slice_sizes = array<i64: " <> T.intercalate ", " (map (T.pack . show) sliceSizes) <> ">"
+        sizesAttr = AttrRaw $ "slice_sizes = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> sliceSizes) <> ">"
 
     let (Tensor operandVid) = operand
-        startVids = map tensorValue startIndices
+        startVids = tensorValue <$> startIndices
         startTypes = replicate (length startIndices) (tensorType (Proxy @'[]) (Proxy @'I64))
 
     vid <- emitOp "stablehlo.dynamic_slice" (operandVid : startVids) (inType : startTypes)
@@ -690,4 +797,358 @@ convert (Tensor x) = do
     let inType  = tensorType (Proxy @s) (Proxy @dIn)
         outType = tensorType (Proxy @s) (Proxy @dOut)
     vid <- emitOp "stablehlo.convert" [x] [inType] [] outType
+    return (Tensor vid)
+
+-- | Element-wise selection between two tensors based on a boolean predicate.
+--
+-- All three tensors must have the same shape.
+select :: forall s d.
+          (KnownShape s, KnownDType d)
+       => Tensor s 'Bool   -- ^ predicate
+       -> Tensor s d       -- ^ value if true
+       -> Tensor s d       -- ^ value if false
+       -> Builder (Tensor s d)
+select pred onTrue onFalse = do
+    let predType = tensorType (Proxy @s) (Proxy @'Bool)
+        valType  = tensorType (Proxy @s) (Proxy @d)
+
+    let (Tensor predVid)   = pred
+        (Tensor trueVid)   = onTrue
+        (Tensor falseVid)  = onFalse
+
+    vid <- emitOp "stablehlo.select"
+            [predVid, trueVid, falseVid]
+            [predType, valType, valType]
+            [] valType
+    return (Tensor vid)
+
+-- | Element-wise map over specified dimensions of one or more tensors.
+--
+-- The @computation@ receives one scalar tensor per input and must produce a
+-- scalar tensor of the output type.
+map :: forall s dIn dOut.
+       (KnownShape s, KnownDType dIn, KnownDType dOut)
+    => [Tensor s dIn]               -- ^ input tensors (all same shape)
+    -> [Int64]                      -- ^ dimensions to map over
+    -> ([Tensor '[] dIn] -> Builder (Tensor '[] dOut))
+    -> Builder (Tensor s dOut)
+map inputs dimensions computation = do
+    let inType  = tensorType (Proxy @s) (Proxy @dIn)
+        outType = tensorType (Proxy @s) (Proxy @dOut)
+        elemInType  = tensorType (Proxy @'[]) (Proxy @dIn)
+        elemOutType = tensorType (Proxy @'[]) (Proxy @dOut)
+
+    -- Build computation region
+    compBlock <- runBlockBuilder (replicate (length inputs) elemInType) $ do
+        args <- mapM (const (arg @'[] @dIn)) inputs
+        result <- computation args
+        emitReturn [tensorValue result] [elemOutType]
+
+    let dimsAttr = AttrRaw $ "dimensions = array<i64: "
+            <> T.intercalate ", " ((T.pack . show) <$> dimensions) <> ">"
+
+    let inputVids = tensorValue <$> inputs
+        inputTypes = replicate (length inputs) inType
+
+    vid <- emitOpRegions "stablehlo.map"
+            inputVids
+            inputTypes
+            [dimsAttr]
+            [Region [compBlock]]
+            outType
+    return (Tensor vid)
+
+-- | Concatenate a list of tensors along a given dimension.
+--
+-- All inputs must have the same rank and identical dimensions except along
+-- the concat axis.
+concatenate :: forall sIn sOut d.
+               (KnownShape sIn, KnownShape sOut, KnownDType d)
+            => Int64            -- ^ dimension to concatenate along
+            -> [Tensor sIn d]   -- ^ input tensors
+            -> Builder (Tensor sOut d)
+concatenate dim inputs = do
+    let inType  = tensorType (Proxy @sIn)  (Proxy @d)
+        outType = tensorType (Proxy @sOut) (Proxy @d)
+        dimAttr = AttrInt "dimension" (fromIntegral dim)
+
+    let inputVids   = tensorValue <$> inputs
+        inputTypes  = replicate (length inputs) inType
+
+    vid <- emitOp "stablehlo.concatenate" inputVids inputTypes [dimAttr] outType
+    return (Tensor vid)
+
+-- | Concatenate two tensors along a given dimension.
+--
+-- The two inputs may have different shapes (differing only along the concat
+-- axis), unlike 'concatenate' which requires all inputs to share the same
+-- type-level shape.
+concatenate2 :: forall s1 s2 sOut d.
+                (KnownShape s1, KnownShape s2, KnownShape sOut, KnownDType d)
+             => Int64 -> Tensor s1 d -> Tensor s2 d -> Builder (Tensor sOut d)
+concatenate2 dim a b = do
+    let inType1 = tensorType (Proxy @s1) (Proxy @d)
+        inType2 = tensorType (Proxy @s2) (Proxy @d)
+        outType = tensorType (Proxy @sOut) (Proxy @d)
+        dimAttr = AttrInt "dimension" (fromIntegral dim)
+
+    vid <- emitOp "stablehlo.concatenate"
+            [tensorValue a, tensorValue b]
+            [inType1, inType2]
+            [dimAttr] outType
+    return (Tensor vid)
+
+-- | Generate a sequence of numbers along the given dimension.
+--
+-- @iota dim@ produces a tensor where each element along @dim@ is its index
+-- in that dimension. All other dimensions have repeated values.
+iota :: forall s. (KnownShape s) => Int64 -> Builder (Tensor s 'I64)
+iota iotaDim = do
+    let outType = tensorType (Proxy @s) (Proxy @'I64)
+        dimAttr = AttrInt "iota_dimension" (fromIntegral iotaDim)
+    vid <- emitOp "stablehlo.iota" [] [] [dimAttr] outType
+    return (Tensor vid)
+
+-- ---------------------------------------------------------------------------
+-- Layer normalization (composite)
+-- ---------------------------------------------------------------------------
+
+-- | Layer normalization over the last dimension.
+--
+-- Input shape @[..., C]@; gamma and beta have shape @[C]@.
+-- Normalizes over the last axis (feature dimension).
+layerNorm :: forall batch seq dModel.
+             (KnownNat batch, KnownNat seq, KnownNat dModel)
+          => Tensor '[batch, seq, dModel] 'F32
+          -> Tensor '[dModel] 'F32   -- ^ gamma (scale)
+          -> Tensor '[dModel] 'F32   -- ^ beta  (shift)
+          -> Builder (Tensor '[batch, seq, dModel] 'F32)
+layerNorm x gamma beta = do
+    let dModelVal = fromIntegral (natVal (Proxy @dModel)) :: Double
+
+    -- mean over last dim: [batch, seq, dModel] -> [batch, seq]
+    mean <- reduceSumDim @'[batch, seq, dModel] @'[batch, seq] [2] x
+    dModelConst <- constant @'[] @'F32 dModelVal
+    dModelBC    <- broadcastWithDims @'[] @'[batch, seq] [] dModelConst
+    mean <- divide mean dModelBC
+
+    -- broadcast mean to [batch, seq, dModel]
+    meanBC <- broadcastWithDims @'[batch, seq] @'[batch, seq, dModel] [0, 1] mean
+
+    -- x - mean
+    centered <- sub x meanBC
+
+    -- var = mean((x - mean)^2)
+    sq <- multiply centered centered
+    var <- reduceSumDim @'[batch, seq, dModel] @'[batch, seq] [2] sq
+    var <- divide var dModelBC
+
+    -- broadcast var
+    varBC <- broadcastWithDims @'[batch, seq] @'[batch, seq, dModel] [0, 1] var
+
+    -- rsqrt(var + epsilon) where epsilon = 1e-5
+    eps  <- constant @'[] @'F32 1.0e-5
+    epsBC <- broadcastWithDims @'[] @'[batch, seq, dModel] [] eps
+    varEps <- add varBC epsBC
+
+    -- sqrt(v) = exp(0.5 * log(v))
+    logVar <- logarithm varEps
+    half   <- constant @'[] @'F32 0.5
+    halfBC <- broadcastWithDims @'[] @'[batch, seq, dModel] [] half
+    halfLog <- multiply halfBC logVar
+    std    <- exponential halfLog
+
+    one <- constant @'[] @'F32 1.0
+    oneBC <- broadcastWithDims @'[] @'[batch, seq, dModel] [] one
+    invStd <- divide oneBC std
+
+    -- normalize
+    normalized <- multiply centered invStd
+
+    -- gamma * normalized + beta
+    gammaBC <- broadcastWithDims @'[dModel] @'[batch, seq, dModel] [2] gamma
+    betaBC  <- broadcastWithDims @'[dModel] @'[batch, seq, dModel] [2] beta
+    scaled  <- multiply normalized gammaBC
+    add scaled betaBC
+
+-- ---------------------------------------------------------------------------
+-- Global average pooling (composite)
+-- ---------------------------------------------------------------------------
+
+-- | Global average pool over spatial dimensions (H, W).
+--
+-- Input: [N, H, W, C] → Output: [N, C]
+globalAvgPool :: forall n h w c.
+                 (KnownNat n, KnownNat h, KnownNat w, KnownNat c)
+              => Tensor '[n, h, w, c] 'F32
+              -> Builder (Tensor '[n, c] 'F32)
+globalAvgPool x = do
+    summed <- reduceSumDim @'[n, h, w, c] @'[n, c] [1, 2] x
+    let hw = fromIntegral (natVal (Proxy @h) * natVal (Proxy @w)) :: Double
+    hwVal <- constant @'[] @'F32 hw
+    hwBC  <- broadcastWithDims @'[] @'[n, c] [] hwVal
+    divide summed hwBC
+
+-- ---------------------------------------------------------------------------
+-- GELU activation (composite)
+-- ---------------------------------------------------------------------------
+
+-- | GELU activation using the tanh approximation.
+--
+-- @gelu(x) ≈ 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))@
+gelu :: forall s. (KnownShape s) => Tensor s 'F32 -> Builder (Tensor s 'F32)
+gelu x = do
+    coeff   <- constant @'[] @'F32 0.044715
+    sqrt2pi <- constant @'[] @'F32 0.7978845608
+    half    <- constant @'[] @'F32 0.5
+    one     <- constant @'[] @'F32 1.0
+
+    -- Broadcast scalars to shape s
+    let sType = tensorType (Proxy @s) (Proxy @'F32)
+        bc scalar = broadcastWithDims @'[] @s [] scalar
+
+    coeffBC   <- bc coeff
+    sqrt2piBC <- bc sqrt2pi
+    halfBC    <- bc half
+    oneBC     <- bc one
+
+    x2 <- multiply x x
+    x3 <- multiply x x2
+    cX3 <- multiply coeffBC x3
+    inner <- add x cX3
+    scaled <- multiply sqrt2piBC inner
+    t <- tanh scaled
+    onePlusT <- add oneBC t
+    halfX <- multiply halfBC x
+    multiply halfX onePlusT
+
+-- ---------------------------------------------------------------------------
+-- Reduce window / pooling
+-- ---------------------------------------------------------------------------
+
+-- | General reduce-window primitive.
+--
+-- For max-pooling use @reduction = "stablehlo.maximum"@ and an init value
+-- of negative infinity. For sum-pooling (avg-pool precursor) use
+-- @reduction = "stablehlo.add"@ and an init value of @0@.
+reduceWindow :: forall sIn sOut d.
+                (KnownShape sIn, KnownShape sOut, KnownDType d)
+             => [Int64]        -- ^ window_dimensions
+             -> [Int64]        -- ^ window_strides
+             -> [[Int64]]      -- ^ padding: [[low, high], ...] per dimension
+             -> Text           -- ^ reduction op, e.g. "stablehlo.maximum"
+             -> Tensor '[] d   -- ^ init value (scalar)
+             -> Tensor sIn d   -- ^ input
+             -> Builder (Tensor sOut d)
+reduceWindow windowDims strides padding reduction initVal input = do
+    let inType   = tensorType (Proxy @sIn)  (Proxy @d)
+        outType  = tensorType (Proxy @sOut) (Proxy @d)
+        elemType = tensorType (Proxy @'[])  (Proxy @d)
+
+    -- Build reduction region (takes 2 scalars, returns 1 scalar)
+    redBlock <- runBlockBuilder [elemType, elemType] $ do
+        a <- arg @'[] @d
+        b <- arg @'[] @d
+        -- We need to dispatch the reduction op dynamically.
+        -- For "stablehlo.maximum" and "stablehlo.add" we have direct wrappers.
+        result <- case reduction of
+            "stablehlo.maximum" -> maximum a b
+            "stablehlo.add"     -> add a b
+            _ -> error $ "reduceWindow: unsupported reduction: " ++ show reduction
+        emitReturn [tensorValue result] [elemType]
+
+    let windowAttr = AttrRaw $ "window_dimensions = array<i64: "
+            <> T.intercalate ", " ((T.pack . show) <$> windowDims) <> ">"
+        strideAttr = AttrRaw $ "window_strides = array<i64: "
+            <> T.intercalate ", " ((T.pack . show) <$> strides) <> ">"
+        paddingAttr = AttrRaw $ "padding = dense<[["
+            <> T.intercalate "], [" (padPair <$> padding) <> "]]> : tensor<"
+            <> T.pack (show (length padding)) <> "x2xi64>"
+
+    let (Tensor initVid) = initVal
+        (Tensor inputVid) = input
+
+    vid <- emitOpRegions "stablehlo.reduce_window"
+            [inputVid, initVid]
+            [inType, elemType]
+            [windowAttr, strideAttr, paddingAttr]
+            [Region [redBlock]]
+            outType
+    return (Tensor vid)
+  where
+    padPair [l, h] = T.pack (show l) <> ", " <> T.pack (show h)
+    padPair _      = error "reduceWindow: padding must be [[low,high], ...]"
+
+-- | 2-D max pooling (NHWC).
+maxPool :: forall n h w c oh ow.
+           (KnownNat n, KnownNat h, KnownNat w, KnownNat c, KnownNat oh, KnownNat ow)
+        => [Int64]   -- ^ kernel [kh, kw]
+        -> [Int64]   -- ^ stride [sh, sw]
+        -> [[Int64]] -- ^ padding per spatial dim [[pt, pb], [pl, pr]]
+        -> Tensor '[n, h, w, c] 'F32
+        -> Builder (Tensor '[n, oh, ow, c] 'F32)
+maxPool kernel stride padding x = do
+    let windowDims = [1, kernel !! 0, kernel !! 1, 1]
+        strides    = [1, stride !! 0, stride !! 1, 1]
+        fullPadding = [[0, 0], padding !! 0, padding !! 1, [0, 0]]
+    -- init value for max: a very negative number
+    initVal <- constant @'[] @'F32 (-1.0e30)
+    reduceWindow windowDims strides fullPadding "stablehlo.maximum" initVal x
+
+-- | 2-D average pooling (NHWC), VALID padding only.
+--
+-- Computes the mean over each pooling window. The output size is determined
+-- by the input size, kernel, and stride (no padding).
+avgPool :: forall n h w c oh ow.
+           (KnownNat n, KnownNat h, KnownNat w, KnownNat c, KnownNat oh, KnownNat ow)
+        => [Int64]   -- ^ kernel [kh, kw]
+        -> [Int64]   -- ^ stride [sh, sw]
+        -> Tensor '[n, h, w, c] 'F32
+        -> Builder (Tensor '[n, oh, ow, c] 'F32)
+avgPool kernel stride x = do
+    let windowDims = [1, kernel !! 0, kernel !! 1, 1]
+        strides    = [1, stride !! 0, stride !! 1, 1]
+        fullPadding = replicate 4 [0, 0]
+        windowSize = fromIntegral (product kernel) :: Double
+    initVal <- constant @'[] @'F32 0.0
+    summed <- reduceWindow windowDims strides fullPadding "stablehlo.add" initVal x
+    divisor <- constant @'[] @'F32 windowSize
+    divisorBC <- broadcastWithDims @'[] @'[n, oh, ow, c] [] divisor
+    divide summed divisorBC
+
+-- ---------------------------------------------------------------------------
+-- Transposed convolution (upsampling)
+-- ---------------------------------------------------------------------------
+
+-- | 2-D transposed convolution (NHWC) for upsampling.
+--
+-- This is implemented as a regular convolution with @lhs_dilation@ > 1 on
+-- the spatial dimensions, which effectively spaces out the input pixels and
+-- produces a larger output.
+transposeConvolution :: forall batch h w inCh outCh kh kw oh ow.
+                        ( KnownNat batch, KnownNat h, KnownNat w
+                        , KnownNat inCh, KnownNat outCh
+                        , KnownNat kh, KnownNat kw, KnownNat oh, KnownNat ow )
+                     => [Int64]   -- ^ lhs_dilation (upsample factor), e.g. [1,2,2,1]
+                     -> [[Int64]] -- ^ padding per spatial dim, e.g. [[1,1],[1,1]] for 2x2 kernel
+                     -> Tensor '[batch, h, w, inCh] 'F32
+                     -> Tensor '[kh, kw, outCh, inCh] 'F32
+                     -> Builder (Tensor '[batch, oh, ow, outCh] 'F32)
+transposeConvolution lhsDilation padding input kernel = do
+    let inType1 = tensorType (Proxy @'[batch, h, w, inCh]) (Proxy @'F32)
+        inType2 = tensorType (Proxy @'[kh, kw, outCh, inCh]) (Proxy @'F32)
+        outType = tensorType (Proxy @'[batch, oh, ow, outCh]) (Proxy @'F32)
+        dimNums = "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]"
+        padStr  = "[[" <> T.pack (show (padding !! 0 !! 0)) <> ", " <> T.pack (show (padding !! 0 !! 1)) <> "], ["
+               <> T.pack (show (padding !! 1 !! 0)) <> ", " <> T.pack (show (padding !! 1 !! 1)) <> "]]"
+        window  = "{stride = [1, 1], pad = " <> padStr
+               <> ", lhs_dilate = [" <> T.intercalate ", " ((T.pack . show) <$> drop 1 (take 3 lhsDilation)) <> "]"
+               <> ", rhs_dilate = [1, 1]}"
+    vid <- emitOp "stablehlo.convolution" [tensorValue input, tensorValue kernel]
+            [inType1, inType2]
+            [ AttrString "dim_numbers" dimNums
+            , AttrString "window" window
+            , AttrInt "batch_group_count" 1
+            , AttrInt "feature_group_count" 1
+            ] outType
     return (Tensor vid)

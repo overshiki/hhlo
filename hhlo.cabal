@@ -258,6 +258,83 @@ executable example-sort
     hs-source-dirs:   examples
     default-language: GHC2021
 
+executable example-select
+    import:           warnings
+    main-is:          20-select.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-map
+    import:           warnings
+    main-is:          21-map.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-new-ops-smoke-test
+    import:           warnings
+    main-is:          22-new-ops-smoke-test.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-resnet
+    import:           warnings
+    main-is:          23-resnet.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-alexnet
+    import:           warnings
+    main-is:          24-alexnet.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-transformer
+    import:           warnings
+    main-is:          25-transformer.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-unet
+    import:           warnings
+    main-is:          26-unet.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
 test-suite hhlo-test
     import:           warnings
     type:             exitcode-stdio-1.0

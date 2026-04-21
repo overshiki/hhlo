@@ -16,7 +16,7 @@ import Foreign.Ptr
 import Foreign.Storable (peek)
 
 import HHLO.Core.Types
-import HHLO.EDSL.Ops
+import HHLO.EDSL.Ops hiding (map)
 import HHLO.IR.AST (FuncArg(..), TensorType(..))
 import HHLO.IR.Builder
 import HHLO.IR.Pretty

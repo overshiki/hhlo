@@ -79,6 +79,17 @@ instance Pretty Operation where
         <> prettyConvAttrs attrs
         <> " : " <> prettyResultType operandTypes resultType
         <> mconcat (map prettyRegion regions)
+    pretty (Operation "stablehlo.dot_general" operands operandTypes attrs regions result resultType) =
+        -- Custom format for dot_general:
+        --   %r = stablehlo.dot_general %lhs, %rhs,
+        --        batching_dims = [0] x [0],
+        --        contracting_dims = [2] x [1]
+        --        : (lhs_type, rhs_type) -> result_type
+        valueRefBuilder result <> " = stablehlo.dot_general "
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ","
+        <> prettyDotGeneralAttrs attrs
+        <> " : " <> prettyResultType operandTypes resultType
+        <> mconcat (map prettyRegion regions)
     pretty (Operation "stablehlo.batch_norm_inference" operands operandTypes attrs regions result resultType) =
         -- Custom format: %r = stablehlo.batch_norm_inference %x, %scale, %offset, %mean, %variance
         --   <{epsilon = 1.0E-5 : f32, feature_index = 1 : i64}> : type
@@ -128,6 +139,28 @@ instance Pretty Operation where
         <> (if null regions then mempty else mconcat (map prettyRegion regions))
         <> (if null attrs then mempty else " " <> prettyAttrs attrs)
         <> " : " <> prettyResultType operandTypes resultType
+    pretty (Operation "stablehlo.transpose" operands operandTypes attrs regions result resultType) =
+        -- Generic form with array<i64: ...> for permutation (PJRT v1.16.0 compat).
+        let attrs' = map fixPermAttr attrs
+        in valueRefBuilder result <> " = \"stablehlo.transpose\"("
+           <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+           <> (if null attrs' then mempty else " " <> prettyAttrs attrs')
+           <> " : " <> prettyResultType operandTypes resultType
+      where
+        fixPermAttr (AttrIntList "permutation" vals) =
+            AttrRaw $ "permutation = array<i64: " <> T.intercalate ", " (map (T.pack . show) vals) <> ">"
+        fixPermAttr a = a
+    pretty (Operation "stablehlo.concatenate" operands operandTypes attrs regions result resultType) =
+        -- Generic form (custom form syntax varies across parser versions).
+        valueRefBuilder result <> " = \"stablehlo.concatenate\"("
+        <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+        <> (if null attrs then mempty else " " <> prettyAttrs attrs)
+        <> " : " <> prettyResultType operandTypes resultType
+    pretty (Operation "stablehlo.iota" _ _ attrs _ result resultType) =
+        -- Generic form (no operands).
+        valueRefBuilder result <> " = \"stablehlo.iota\"()"
+        <> (if null attrs then mempty else " " <> prettyAttrs attrs)
+        <> " : () -> " <> pretty resultType
     pretty (Operation "stablehlo.sort" operands operandTypes attrs regions result resultType) =
         -- Generic form (has regions; fallback would already use generic, but explicit is clearer).
         valueRefBuilder result <> " = \"stablehlo.sort\"("
@@ -211,6 +244,22 @@ prettyConvAttrs attrs =
     isCustomConvAttr (AttrString "dim_numbers" _) = True
     isCustomConvAttr (AttrString "window" _)      = True
     isCustomConvAttr _                            = False
+
+-- | Pretty-print attributes for 'stablehlo.dot_general'.
+-- Extracts 'batching_dims' and 'contracting_dims' from the custom string attributes.
+prettyDotGeneralAttrs :: [Attribute] -> Builder
+prettyDotGeneralAttrs attrs =
+    let batch       = lookupAttrString "batching_dims" attrs
+        contract    = lookupAttrString "contracting_dims" attrs
+        rest        = filter (not . isCustomDotAttr) attrs
+        custom      = (if T.null batch    then mempty else "\n    batching_dims = " <> fromText batch <> ",")
+                   <> (if T.null contract then mempty else "\n    contracting_dims = " <> fromText contract)
+        dict        = if null rest then mempty else "\n    " <> prettyAttrs rest
+    in custom <> dict
+  where
+    isCustomDotAttr (AttrString "batching_dims" _)    = True
+    isCustomDotAttr (AttrString "contracting_dims" _) = True
+    isCustomDotAttr _                                 = False
 
 -- | Pretty-print attributes for 'stablehlo.batch_norm_inference'.
 -- Uses the generic op format with <{...}> around the attributes.
