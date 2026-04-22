@@ -1,7 +1,7 @@
 # HHLO Project Status: Progress and Remaining Work
 
-**Date:** 2026-04-20
-**Status:** All planned P1–P3 items complete. 26 examples (22 foundational + 4 complex model examples), 115/115 tests pass on CPU. 23/26 examples execute numerically on CPU; 3 are MLIR print-only due to PJRT v1.16.0 parser limitations.
+**Date:** 2026-04-22
+**Status:** GPU support implemented. 28 examples, 115/115 CPU tests pass, 120/120 tests pass with GPU enabled. Single-GPU execution fully operational on NVIDIA CUDA via PJRT.
 
 ---
 
@@ -9,12 +9,15 @@
 
 ### 1. Architecture & Design
 - **Text emission + PJRT** chosen as the correct path (no `mlir-hs` dependency).
-- Full design docs written: `design.md`, `implementation-design.md`, `understanding-pjrt.md`, `understanding-zml-pjrt-artifacts.md`, `text-emission-vs-mlir-hs.md`, `control-flow-ops-design.md`, `complex-model-examples-design.md`, `pjrt-cpu-v1160-parser-limitations.md`, `test-suite-documentation.md`.
+- Full design docs written: `design.md`, `implementation-design.md`, `understanding-pjrt.md`, `understanding-zml-pjrt-artifacts.md`, `text-emission-vs-mlir-hs.md`, `control-flow-ops-design.md`, `complex-model-examples-design.md`, `pjrt-cpu-v1160-parser-limitations.md`, `test-suite-documentation.md`, `cuda-runtime-installation.md`.
 
 ### 2. Build System
-- `cabal build all` completes successfully (library + demo + 26 examples + test suite).
-- `cabal test` passes 115/115 tests.
+- `cabal build all` completes successfully (library + demo + 28 examples + test suite).
+- `cabal test` passes 115/115 tests on CPU.
+- `HHLO_TEST_GPU=1 cabal test` passes 120/120 tests (115 CPU + 5 GPU integration).
 - PJRT CPU plugin (`deps/pjrt/libpjrt_cpu.so`) downloads and loads correctly via `pjrt_script.sh`.
+- PJRT CUDA plugin (`deps/pjrt/libpjrt_cuda.so`) downloads automatically when `nvidia-smi` is present.
+- `setup_gpu_env.sh` auto-discovers NVIDIA runtime libraries and configures `LD_LIBRARY_PATH` idempotently.
 - C++ linkage resolved: `extra-libraries: stdc++` and `dl` in library, test, and example stanzas.
 
 ### 3. Core Library (`src/HHLO/`)
@@ -22,22 +25,29 @@
 |--------|--------|-------|
 | `Core.Types` | ✅ | DTypes, shapes, `KnownShape`, `HostType` family |
 | `IR.AST` | ✅ | Core MLIR AST; multi-result support; `Block` / `Region` for nested ops; `AttrRaw` for dialect attrs |
-| `IR.Builder` | ✅ | Stateful `Builder`; `Tuple2`; general `Tuple` with `TupleBuilder`; `runBuilderT` / `moduleFromBuilderT`; **`emitOpRegions`**, **`runBlockBuilder`**, **`emitReturn`** |
-| `IR.Pretty` | ✅ | StableHLO MLIR text; `module { ... }`; `dense<[[...]]>` for N-D constants; **generic region form** for `stablehlo.reduce`; **integer literal formatting** for `i64`/`Bool` constants; unique `^bbN` block labels; `stablehlo.return` terminator; **custom `stablehlo.dot_general` syntax** |
+| `IR.Builder` | ✅ | Stateful `Builder`; `Tuple2`; general `Tuple` with `TupleBuilder`; `runBuilderT` / `moduleFromBuilderT`; `emitOpRegions`, `runBlockBuilder`, `emitReturn` |
+| `IR.Pretty` | ✅ | StableHLO MLIR text; `module { ... }`; `dense<[[...]]>` for N-D constants; generic region form for `stablehlo.reduce`; integer literal formatting for `i64`/`Bool` constants; unique `^bbN` block labels; `stablehlo.return` terminator; custom `stablehlo.dot_general` syntax |
 | `EDSL.Ops` | ✅ | 50+ ops: all element-wise, reductions, shape manipulation, convolutions, NN layers, control flow, data movement |
-| `Runtime.PJRT.FFI` | ✅ | FFI + `executableNumOutputs` + event bindings + buffer metadata bindings |
-| `Runtime.PJRT.Types` | ✅ | Newtype wrappers + 16 buffer-type constants |
+| `Runtime.PJRT.FFI` | ✅ | FFI + `executableNumOutputs` + event bindings + buffer metadata bindings + **device enumeration** + **device-aware execution** + **async D2H** |
+| `Runtime.PJRT.Types` | ✅ | Newtype wrappers + 16 buffer-type constants + **`PJRTDevice`** |
 | `Runtime.PJRT.Error` | ✅ | `checkError`, `withErrorMessage`, `PJRTException` |
+| `Runtime.PJRT.Plugin` | ✅ | **New.** Backend-agnostic `withPJRT`; convenience wrappers `withPJRTCPU`, `withPJRTGPU` |
+| `Runtime.Device` | ✅ | **New.** `addressableDevices`, `deviceId`, `deviceKind`, `defaultGPUDevice` |
 | `Runtime.Compile` | ✅ | `compile` with `ForeignPtr` finalizer |
-| `Runtime.Execute` | ✅ | `execute` with dynamic output count |
+| `Runtime.Execute` | ✅ | `execute` with dynamic output count + **`executeOn`** for explicit device targeting |
 | `Runtime.Async` | ✅ | `executeAsync`, `bufferReady`, `awaitBuffers` |
-| `Runtime.Buffer` | ✅ | `toDevice`/`fromDevice` + `bufferDimensions`, `bufferElementType`, `bufferOnDeviceSize` |
+| `Runtime.Buffer` | ✅ | `toDevice`/`fromDevice` + `toDeviceOn` (explicit device) + `fromDeviceAsync` (non-blocking D2H) + `bufferDimensions`, `bufferElementType`, `bufferOnDeviceSize` |
 
-### 4. C Shim (`cbits/pjrt_shim.c`)
+### 4. C Shim (`cbits/pjrt_shim.c` + `cbits/pjrt_shim.h`)
 - ✅ Plugin loading, client creation/destruction, compilation, execution
 - ✅ Dynamic output count, buffer type constants (16 getters)
 - ✅ Buffer ready events, event polling, event await/destroy
 - ✅ Buffer metadata: `hhlo_pjrt_buffer_dimensions`, `hhlo_pjrt_buffer_element_type`, `hhlo_pjrt_buffer_on_device_size`
+- ✅ **Device enumeration:** `hhlo_pjrt_client_addressable_device_count`, `hhlo_pjrt_client_addressable_device`, `hhlo_pjrt_device_id`, `hhlo_pjrt_device_kind`
+- ✅ **Device-aware buffer creation:** `hhlo_pjrt_buffer_from_host_on_device`
+- ✅ **Async D2H:** `hhlo_pjrt_buffer_to_host_async`
+- ✅ **Device-aware execution:** `hhlo_pjrt_execute_on_device`
+- ✅ **Formal C header:** `pjrt_shim.h` for clean FFI declarations
 
 ### 5. Demo & Examples
 | # | File | Description | Status |
@@ -64,14 +74,20 @@
 | 19 | `examples/19-sort.hs` | `sort` 1-D ascending (MLIR print-only) | ⚠️ PJRT v1.16.0 cannot parse `stablehlo.compare` |
 | 20 | `examples/20-select.hs` | `select` element-wise ternary | ✅ |
 | 21 | `examples/21-map.hs` | `map` element-wise custom computation | ✅ |
-| 22 | `examples/22-new-ops-smoke-test.hs` | Smoke test for all new ops | ✅ |
+| 22 | `examples/22-new-ops-smoke-test.hs` | Smoke test for all newer ops | ✅ |
 | 23 | `examples/23-resnet.hs` | ResNet-18 inference (toy 8×8) | ✅ |
 | 24 | `examples/24-alexnet.hs` | AlexNet inference (toy 16×16) | ✅ |
 | 25 | `examples/25-transformer.hs` | Transformer encoder (1×4×16) | ✅ |
 | 26 | `examples/26-unet.hs` | UNet segmentation (toy 16×16) | ✅ |
+| **27** | `examples/27-gpu-add.hs` | **GPU smoke test: `add` on CUDA** | ✅ |
+| **28** | `examples/28-gpu-matmul-bench.hs` | **GPU benchmark: 4096×4096 matmul** | ✅ |
 
 ### 6. Test Suite (`test/`)
-- ✅ **115 tests** across 13 modules, all passing.
+- ✅ **115 CPU tests** across 13 modules, all passing.
+- ✅ **5 GPU integration tests** (run with `HHLO_TEST_GPU=1`):
+  - `Test.Runtime.EndToEndGPU` — GPU availability & device enumeration
+  - `Test.Runtime.BufferGPU` — Buffer round-trip and metadata on GPU
+  - `Test.Runtime.AsyncGPU` — `executeAsync` + `awaitBuffers`, `bufferReady` polling on GPU
 - Tier 1 (Golden): `Test.IR.Pretty`, `Test.IR.PrettyOps`, `Test.IR.PrettyNN`, `Test.IR.PrettyControlFlow`, `Test.IR.Builder`, `Test.EDSL.Ops`
 - Tier 2 (E2E Numerical): `Test.Runtime.EndToEndArithmetic`, `Test.Runtime.EndToEndMatmul`, `Test.Runtime.EndToEndDataMovement`, `Test.Runtime.EndToEndNN`, `Test.Runtime.EndToEndReductions`, `Test.Runtime.EndToEndShape`
 - Tier 3 (Integration): `Test.Runtime.Buffer`, `Test.Runtime.Async`, `Test.Runtime.Errors`
@@ -79,7 +95,7 @@
 
 ---
 
-## Completed P1–P3 Items (no longer remaining)
+## Completed P1–P3 Items
 
 | # | Item | Status |
 |---|------|--------|
@@ -96,17 +112,22 @@
 | 11 | Selection & map ops | ✅ `select`, `map` implemented |
 | 12 | Complex model primitives | ✅ `transpose`, `tanh`, `concatenate`, `iota`, `reduceWindow`, `maxPool`, `avgPool`, `softmax3D/4D`, `layerNorm`, `globalAvgPool`, `gelu`, `transposeConvolution`, `dotGeneral`, `conv2dWithPadding` |
 | 13 | Complex model examples | ✅ ResNet-18, AlexNet, Transformer, UNet all compile and execute on CPU |
-| 14 | Comprehensive test suite | ✅ 115 tests across golden, E2E, and integration tiers |
+| 14 | Comprehensive test suite | ✅ 115 CPU tests across golden, E2E, and integration tiers |
 | 15 | Integer constant pretty-printing | ✅ `dense<0>` for `i64`, `true`/`false` for `Bool` |
 | 16 | `stablehlo.reduce` generic form | ✅ Proper region-based emission for partial reductions |
+| **17** | **Single-GPU support** | ✅ **Device enumeration, device-aware buffers/execution, async D2H. 5 GPU tests pass on NVIDIA RTX 5090.** |
+| **18** | **Backend-agnostic plugin loading** | ✅ **`withPJRT` abstracts CPU/CUDA plugin selection.** |
+| **19** | **GPU examples & benchmarks** | ✅ **`example-gpu-add` and `example-gpu-matmul-bench` operational.** |
+| **20** | **Multi-GPU inference scaling** | ✅ **`executeReplicas` runs concurrent `executeOn` across N GPUs. `compileWithOptions` supports `num_replicas`. `example-multi-gpu-inference` verified on 8× RTX 5090.** |
 
 ---
 
 ## Known Limitations / Technical Debt
 
-### 1. Single-Device Execution Only
-- `execute` targets a single device with a default device assignment.
-- **Impact:** Blocks multi-GPU / TPU and data-parallel execution.
+### 1. Single-Device Execution (GPU works, multi-GPU inference works)
+- `executeOn` targets exactly one device. ✅
+- `executeReplicas` distributes independent forward passes across multiple GPUs concurrently. ✅
+- **Clarification:** HHLO is an **inference-only** framework. We do not have automatic differentiation, gradients, or backpropagation. Multi-GPU means inference scaling only.
 
 ### 2. PJRT CPU v1.16.0 Parser Limitations
 The specific `libpjrt_cpu.so` build from `zml/pjrt-artifacts` (StableHLO v1.16.0) has a text parser with known gaps:
@@ -129,47 +150,58 @@ The specific `libpjrt_cpu.so` build from `zml/pjrt-artifacts` (StableHLO v1.16.0
 
 ### 4. Error Handling Could Be Richer
 - `PJRTException` only carries a `String` message.
+- No structured error codes (OOM, compilation failure, driver mismatch, etc.).
 
 ### 5. C Shim Completeness
-- Missing: `PJRT_Client_Devices`, `PJRT_Device_Memory`, `PJRT_TopologyDescription`.
+- ~~Missing: `PJRT_Client_Devices`, `PJRT_Device_Memory`, `PJRT_TopologyDescription`.~~ ✅ Device enumeration added.
 - Missing: `PJRT_Executable_Serialize`, `PJRT_Executable_Deserialize`.
+- Missing: `PJRT_TopologyDescription` (for multi-node topology discovery).
+
+### 6. CUDA Runtime Dependency Management
+- The PJRT CUDA plugin requires cuDNN, NCCL, and NVSHMEM at runtime.
+- `setup_gpu_env.sh` discovers these from conda/pip installations; a fully self-contained distribution would bundle or statically link these.
+- The `nvshmem_transport_ibrc.so.4` → `.so.3` version mismatch requires a symlink workaround.
 
 ---
 
 ## Remaining Work (Prioritized)
 
 ### P1 — Important
-1. **Multi-device / GPU support** — pass device lists to `execute`, topology queries, test `libpjrt_cuda.so`.
+1. **Profiling integration** — Compile and execution timing via PJRT profiling APIs.
+2. **Cross-device buffer copies** — `PJRT_Buffer_CopyToDevice` for moving intermediate tensors between GPUs (needed for model/pipeline parallelism).
 
 ### P2 — Nice to have
-2. **Profiling integration** — compile and execution timing.
-3. **Executable serialization / deserialization** — cache compiled programs.
-4. **Shape inference improvements** — more complete type families for ops.
-5. **Constant folding in Builder** — evaluate pure ops at compile time.
+3. **Executable serialization / deserialization** — Cache compiled programs to disk.
+4. **Shape inference improvements** — More complete type families for ops.
+5. **Constant folding in Builder** — Evaluate pure ops at compile time.
+6. **Richer error types** — Structured `PJRTException` with error codes.
 
 ### P3 — Completed ✅
-6. ~~More EDSL ops — `map`, `select`~~ ✅ Done.
-7. ~~Fix `transpose` + add missing primitives~~ ✅ Done.
-8. ~~Add composite helpers~~ ✅ Done.
-9. ~~ResNet-18 inference example~~ ✅ Done.
-10. ~~Transformer encoder example~~ ✅ Done.
-11. ~~AlexNet inference example~~ ✅ Done.
-12. ~~UNet inference example~~ ✅ Done.
-13. ~~Comprehensive test suite~~ ✅ Done.
+7. ~~More EDSL ops — `map`, `select`~~ ✅ Done.
+8. ~~Fix `transpose` + add missing primitives~~ ✅ Done.
+9. ~~Add composite helpers~~ ✅ Done.
+10. ~~ResNet-18 inference example~~ ✅ Done.
+11. ~~Transformer encoder example~~ ✅ Done.
+12. ~~AlexNet inference example~~ ✅ Done.
+13. ~~UNet inference example~~ ✅ Done.
+14. ~~Comprehensive test suite~~ ✅ Done.
+15. ~~Single-GPU CUDA support~~ ✅ Done.
 
 ---
 
 ## Immediate Next Steps (awaiting your decision)
 
-All originally planned P1–P3 items are done. The codebase is at a **mature prototype** stage with:
-- A solid type-safe NN-layer EDSL (50+ ops)
+The codebase is at a **solid single-GPU prototype** stage with:
+- A type-safe NN-layer EDSL (50+ ops)
 - Full control flow support
 - Four validated complex model examples (ResNet, AlexNet, Transformer, UNet)
-- 26 working examples, 115/115 tests passing
+- 28 working examples (26 CPU + 2 GPU)
+- 115/115 CPU tests passing, 120/120 with GPU enabled
+- Verified on 8× NVIDIA GeForce RTX 5090
 
 The most impactful next decisions are:
 
-1. **Target GPU next?** Download `libpjrt_cuda.so`, verify multi-device execution, and add device-selection APIs.
-2. **Improve ergonomics?** Add profiling, executable serialization, and richer error types.
-3. **Add more model examples?** e.g., LSTM, diffusion UNet, Vision Transformer.
-4. **Refine the EDSL?** Better shape inference, automatic broadcasting, or higher-level layer combinators.
+1. **Improve ergonomics?** Add profiling, executable serialization, and richer error types.
+2. **Add more model examples?** e.g., LSTM, diffusion UNet, Vision Transformer.
+3. **Refine the EDSL?** Better shape inference, automatic broadcasting, or higher-level layer combinators.
+4. **Cross-device communication?** Add buffer copy between GPUs for model/pipeline parallelism.

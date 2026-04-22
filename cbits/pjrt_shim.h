@@ -39,6 +39,12 @@ PJRT_Error* hhlo_pjrt_device_kind(PJRT_Api* api, PJRT_Device* device,
 PJRT_Error* hhlo_pjrt_compile(PJRT_Api* api, PJRT_Client* client,
                                const char* code, size_t code_size,
                                PJRT_LoadedExecutable** out_exec);
+
+PJRT_Error* hhlo_pjrt_compile_with_options(PJRT_Api* api, PJRT_Client* client,
+                                            const char* code, size_t code_size,
+                                            int num_replicas,
+                                            PJRT_LoadedExecutable** out_exec);
+
 PJRT_Error* hhlo_pjrt_loaded_executable_destroy(PJRT_Api* api,
                                                  PJRT_LoadedExecutable* exec);
 PJRT_Error* hhlo_pjrt_executable_num_outputs(PJRT_Api* api,
@@ -61,6 +67,15 @@ PJRT_Error* hhlo_pjrt_execute_on_device(PJRT_Api* api,
                                          size_t max_outputs,
                                          PJRT_Buffer** out_outputs,
                                          size_t* out_num_outputs);
+
+PJRT_Error* hhlo_pjrt_execute_multi(PJRT_Api* api,
+                                     PJRT_LoadedExecutable* exec,
+                                     size_t num_devices,
+                                     size_t num_args,
+                                     PJRT_Buffer*** args_in,
+                                     size_t max_outputs,
+                                     PJRT_Buffer*** out_outputs,
+                                     size_t* out_num_outputs_per_device);
 
 /* ---------------------------------------------------------------------------
  * Buffers

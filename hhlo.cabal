@@ -33,7 +33,8 @@ library
         vector        ^>= 0.13,
         containers    ^>= 0.6,
         transformers  ^>= 0.6,
-        mtl           ^>= 2.3
+        mtl           ^>= 2.3,
+        async         ^>= 2.2
     hs-source-dirs:   src
     default-language: GHC2021
     include-dirs:     cbits
@@ -360,6 +361,18 @@ executable example-gpu-matmul-bench
     hs-source-dirs:   examples
     default-language: GHC2021
 
+executable example-multi-gpu-inference
+    import:           warnings
+    main-is:          29-multi-gpu-inference.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text,
+        time
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
 test-suite hhlo-test
     import:           warnings
     type:             exitcode-stdio-1.0
@@ -382,6 +395,7 @@ test-suite hhlo-test
         Test.Runtime.EndToEndGPU
         Test.Runtime.BufferGPU
         Test.Runtime.AsyncGPU
+        Test.Runtime.MultiGPU
     build-depends:
         base,
         hhlo,

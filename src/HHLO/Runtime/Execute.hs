@@ -2,6 +2,7 @@ module HHLO.Runtime.Execute
     ( execute
     , executeOn
     , executeAsync
+    , executeReplicas
     ) where
 
 import GHC.ForeignPtr (unsafeForeignPtrToPtr)
@@ -11,6 +12,7 @@ import Foreign.Ptr
 import Foreign.Storable
 import qualified Foreign.Concurrent as Conc (newForeignPtr)
 
+import Control.Concurrent.Async (mapConcurrently)
 import Control.Exception (throwIO)
 import HHLO.Runtime.PJRT.FFI
 import HHLO.Runtime.PJRT.Types
@@ -71,6 +73,17 @@ executeOn api exec dev buffers = do
 -- via the buffer's ready event or by copying to host.
 executeAsync :: PJRTApi -> PJRTExecutable -> [PJRTBuffer] -> IO [PJRTBuffer]
 executeAsync = execute  -- For now, same implementation; can be optimized later
+
+-- | Execute the same compiled program concurrently on multiple devices.
+-- Each device receives its own input buffers; outputs are gathered
+-- in the same order as the input device list.
+--
+-- This is the recommended API for multi-GPU inference scaling.
+-- It launches independent executions via Haskell's async threads,
+-- which the underlying PJRT CUDA plugin schedules onto each GPU.
+executeReplicas :: PJRTApi -> PJRTExecutable -> [(PJRTDevice, [PJRTBuffer])] -> IO [[PJRTBuffer]]
+executeReplicas api exec deviceArgs =
+    mapConcurrently (uncurry (executeOn api exec)) deviceArgs
 
 unApi :: PJRTApi -> Ptr PJRTApi
 unApi (PJRTApi p) = p

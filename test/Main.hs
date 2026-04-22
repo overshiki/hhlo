@@ -18,6 +18,7 @@ import qualified Test.Runtime.Errors as Errors
 import qualified Test.Runtime.EndToEndGPU as EndToEndGPU
 import qualified Test.Runtime.BufferGPU as BufferGPU
 import qualified Test.Runtime.AsyncGPU as AsyncGPU
+import qualified Test.Runtime.MultiGPU as MultiGPU
 
 main :: IO ()
 main = do
@@ -27,6 +28,7 @@ main = do
                 [ EndToEndGPU.tests
                 , BufferGPU.tests
                 , AsyncGPU.tests
+                , MultiGPU.tests
                 ]
             _ -> []
     defaultMain $ testGroup "HHLO Tests" $

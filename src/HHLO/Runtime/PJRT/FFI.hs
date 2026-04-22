@@ -53,6 +53,15 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_compile"
                   -> Ptr (Ptr PJRTExecutable)
                   -> IO (Ptr PJRTError)
 
+foreign import ccall "pjrt_shim.h hhlo_pjrt_compile_with_options"
+    c_pjrtCompileWithOptions :: Ptr PJRTApi
+                             -> Ptr PJRTClient
+                             -> CString
+                             -> CSize
+                             -> CInt          -- num_replicas
+                             -> Ptr (Ptr PJRTExecutable)
+                             -> IO (Ptr PJRTError)
+
 foreign import ccall "pjrt_shim.h hhlo_pjrt_loaded_executable_destroy"
     c_pjrtLoadedExecutableDestroy :: Ptr PJRTApi -> Ptr PJRTExecutable -> IO (Ptr PJRTError)
 
@@ -83,6 +92,17 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_execute_on_device"
                           -> Ptr (Ptr PJRTBuffer) -- out_outputs
                           -> Ptr CSize             -- out_num_outputs
                           -> IO (Ptr PJRTError)
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_execute_multi"
+    c_pjrtExecuteMulti :: Ptr PJRTApi
+                       -> Ptr PJRTExecutable
+                       -> CSize                   -- num_devices
+                       -> CSize                   -- num_args
+                       -> Ptr (Ptr (Ptr PJRTBuffer)) -- args_in (device × arg)
+                       -> CSize                   -- max_outputs
+                       -> Ptr (Ptr (Ptr PJRTBuffer)) -- out_outputs (device × output)
+                       -> Ptr CSize                -- out_num_outputs_per_device
+                       -> IO (Ptr PJRTError)
 
 -- ---------------------------------------------------------------------------
 -- Buffers

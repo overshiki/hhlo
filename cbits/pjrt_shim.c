@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pjrt_c_api.h"
+#include "pjrt_shim.h"
 
 // ---------------------------------------------------------------------------
 // Plugin loading
@@ -58,9 +59,60 @@ PJRT_Error* hhlo_pjrt_client_destroy(PJRT_Api* api, PJRT_Client* client) {
 // Compilation
 // ---------------------------------------------------------------------------
 
+// Encode a uint64 as a protobuf varint. Returns number of bytes written.
+static size_t encode_varint(uint64_t value, char* out) {
+    size_t i = 0;
+    while (value >= 0x80) {
+        out[i++] = (char)((value & 0x7f) | 0x80);
+        value >>= 7;
+    }
+    out[i++] = (char)value;
+    return i;
+}
+
+// Build a minimal CompileOptionsProto with configurable num_replicas.
+// The proto structure is:
+//   message CompileOptions {
+//     ExecutableBuildOptions executable_build_options = 3;
+//   }
+//   message ExecutableBuildOptions {
+//     int32 num_replicas   = 4;
+//     int32 num_partitions = 5;
+//   }
+static size_t build_compile_options_proto(int num_replicas, char* out, size_t out_size) {
+    // We need: 0x1a [len] [0x20 replicas_varint] [0x28 0x01]
+    // Max varint length for int32 is 5 bytes, but for small values (<=127) it's 1.
+    char replicas_varint[5];
+    size_t replicas_len = encode_varint((uint64_t)num_replicas, replicas_varint);
+
+    size_t submsg_len = 1 + replicas_len + 2;  // tag4 + varint + tag5 + 0x01
+    size_t total_len = 1 + 1 + submsg_len;     // 0x1a + len_byte + submsg
+
+    if (total_len > out_size) return 0;
+
+    size_t i = 0;
+    out[i++] = 0x1a;                    // field 3, wire type 2 (length-delimited)
+    out[i++] = (char)submsg_len;        // submessage length (fits in 1 byte for small values)
+    out[i++] = 0x20;                    // field 4, wire type 0 (varint)
+    for (size_t j = 0; j < replicas_len; ++j) {
+        out[i++] = replicas_varint[j];
+    }
+    out[i++] = 0x28;                    // field 5, wire type 0 (varint)
+    out[i++] = 0x01;                    // num_partitions = 1
+
+    return i;
+}
+
 PJRT_Error* hhlo_pjrt_compile(PJRT_Api* api, PJRT_Client* client,
                                const char* code, size_t code_size,
                                PJRT_LoadedExecutable** out_exec) {
+    return hhlo_pjrt_compile_with_options(api, client, code, code_size, 1, out_exec);
+}
+
+PJRT_Error* hhlo_pjrt_compile_with_options(PJRT_Api* api, PJRT_Client* client,
+                                            const char* code, size_t code_size,
+                                            int num_replicas,
+                                            PJRT_LoadedExecutable** out_exec) {
     PJRT_Program program = {0};
     program.struct_size = PJRT_Program_STRUCT_SIZE;
     program.code = (char*) code;
@@ -68,20 +120,15 @@ PJRT_Error* hhlo_pjrt_compile(PJRT_Api* api, PJRT_Client* client,
     program.format = "mlir";
     program.format_size = 4;
 
-    // Minimal CompileOptionsProto:
-    //   field 3 (executable_build_options, wire type 2 = length-delimited): 0x1a
-    //   length: 4
-    //   submessage (ExecutableBuildOptionsProto):
-    //     field 4 (num_replicas, varint): 0x20 0x01
-    //     field 5 (num_partitions, varint): 0x28 0x01
-    static const char compile_options_proto[] = {0x1a, 0x04, 0x20, 0x01, 0x28, 0x01};
+    char compile_options_proto[16];
+    size_t proto_size = build_compile_options_proto(num_replicas, compile_options_proto, sizeof(compile_options_proto));
 
     PJRT_Client_Compile_Args args = {0};
     args.struct_size = PJRT_Client_Compile_Args_STRUCT_SIZE;
     args.client = client;
     args.program = &program;
     args.compile_options = compile_options_proto;
-    args.compile_options_size = sizeof(compile_options_proto);
+    args.compile_options_size = proto_size;
     args.executable = NULL;
 
     PJRT_Error* err = api->PJRT_Client_Compile(&args);
@@ -564,6 +611,42 @@ PJRT_Error* hhlo_pjrt_execute_on_device(PJRT_Api* api,
             else break;
         }
         *out_num_outputs = n;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_execute_multi(PJRT_Api* api,
+                                     PJRT_LoadedExecutable* exec,
+                                     size_t num_devices,
+                                     size_t num_args,
+                                     PJRT_Buffer*** args_in,
+                                     size_t max_outputs,
+                                     PJRT_Buffer*** out_outputs,
+                                     size_t* out_num_outputs_per_device) {
+    PJRT_ExecuteOptions options = {0};
+    options.struct_size = PJRT_ExecuteOptions_STRUCT_SIZE;
+
+    PJRT_LoadedExecutable_Execute_Args exec_args = {0};
+    exec_args.struct_size = PJRT_LoadedExecutable_Execute_Args_STRUCT_SIZE;
+    exec_args.executable = exec;
+    exec_args.options = &options;
+    exec_args.argument_lists = (PJRT_Buffer* const* const*) args_in;
+    exec_args.num_devices = num_devices;
+    exec_args.num_args = num_args;
+    exec_args.output_lists = (PJRT_Buffer** const*) out_outputs;
+    exec_args.device_complete_events = NULL;
+    exec_args.execute_device = NULL;
+
+    PJRT_Error* err = api->PJRT_LoadedExecutable_Execute(&exec_args);
+    if (err == NULL) {
+        for (size_t d = 0; d < num_devices; ++d) {
+            size_t n = 0;
+            for (size_t i = 0; i < max_outputs; ++i) {
+                if (out_outputs[d][i] != NULL) n++;
+                else break;
+            }
+            out_num_outputs_per_device[d] = n;
+        }
     }
     return err;
 }
