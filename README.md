@@ -350,10 +350,9 @@ The `doc/` directory contains detailed design documents:
 | `implementation-design.md` | Four-layer architecture and design decisions |
 | `progress-and-remaining-work.md` | Current status, completed features, and backlog |
 | `test-suite-documentation.md` | Test catalog and tier descriptions |
-| `cuda-runtime-installation.md` | Manual installation guide for cuDNN/NCCL/NVSHMEM |
 
 ---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) (if present) or contact the maintainer.
+MIT License — see [LICENSE](LICENSE).
