@@ -13,10 +13,7 @@ module Test.Utils
 import qualified Data.Text as T
 import qualified Data.Vector.Storable as V
 import Control.Exception (try)
-import Foreign.C
-import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr
-import Foreign.Storable (peek)
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -25,29 +22,12 @@ import HHLO.EDSL.Ops
 import HHLO.IR.AST (FuncArg(..), TensorType(..))
 import HHLO.IR.Builder
 import HHLO.IR.Pretty
-import HHLO.Runtime.PJRT.FFI
+import HHLO.Runtime.PJRT.Plugin (withPJRTCPU)
 import HHLO.Runtime.PJRT.Types
-import HHLO.Runtime.PJRT.Error
+import HHLO.Runtime.PJRT.Error (PJRTException)
 import HHLO.Runtime.Compile
 import HHLO.Runtime.Execute
 import HHLO.Runtime.Buffer
-
--- | Load PJRT CPU plugin, create client, run action, then destroy client.
-withPJRTCPU :: (PJRTApi -> PJRTClient -> IO a) -> IO a
-withPJRTCPU action = do
-    api <- withCString "deps/pjrt/libpjrt_cpu.so" $ \path -> do
-        alloca $ \apiPtrPtr -> do
-            checkError nullPtr $ c_pjrtLoadPlugin path apiPtrPtr
-            PJRTApi <$> peek apiPtrPtr
-
-    client <- alloca $ \clientPtrPtr -> do
-        checkError (unApi api) $ c_pjrtCreateClient (unApi api) clientPtrPtr
-        PJRTClient <$> peek clientPtrPtr
-
-    result <- action api client
-
-    checkError (unApi api) $ c_pjrtClientDestroy (unApi api) (unClient client)
-    return result
 
 -- | Golden test: compare actual text to expected text.
 goldenTest :: String -> T.Text -> T.Text -> TestTree
@@ -109,8 +89,3 @@ assertThrowsPJRT name action =
             Left (_ :: PJRTException) -> return ()
             Right _ -> assertFailure "Expected PJRTException but action succeeded"
 
-unApi :: PJRTApi -> Ptr PJRTApi
-unApi (PJRTApi p) = p
-
-unClient :: PJRTClient -> Ptr PJRTClient
-unClient (PJRTClient p) = p

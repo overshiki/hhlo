@@ -7,6 +7,7 @@ module HHLO.Runtime.PJRT.Types
     , PJRTExecutable(..)
     , PJRTError(..)
     , PJRTEvent(..)
+    , PJRTDevice(..)
     -- * Buffer type constants
     , bufferTypeInvalid
     , bufferTypePred
@@ -37,6 +38,7 @@ newtype PJRTBuffer     = PJRTBuffer     (ForeignPtr PJRTBuffer)
 newtype PJRTExecutable = PJRTExecutable (ForeignPtr PJRTExecutable)
 newtype PJRTError      = PJRTError      (Ptr PJRTError)
 newtype PJRTEvent      = PJRTEvent      (Ptr PJRTEvent)
+newtype PJRTDevice     = PJRTDevice     (Ptr PJRTDevice)
 
 -- ---------------------------------------------------------------------------
 -- Buffer type constants (fetched from C shim at first use)

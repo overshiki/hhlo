@@ -20,6 +20,8 @@ library
         HHLO.Runtime.PJRT.FFI
         HHLO.Runtime.PJRT.Types
         HHLO.Runtime.PJRT.Error
+        HHLO.Runtime.PJRT.Plugin
+        HHLO.Runtime.Device
         HHLO.Runtime.Compile
         HHLO.Runtime.Execute
         HHLO.Runtime.Async
@@ -335,6 +337,29 @@ executable example-unet
     hs-source-dirs:   examples
     default-language: GHC2021
 
+executable example-gpu-add
+    import:           warnings
+    main-is:          27-gpu-add.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
+executable example-gpu-matmul-bench
+    import:           warnings
+    main-is:          28-gpu-matmul-bench.hs
+    build-depends:
+        base,
+        hhlo,
+        vector,
+        text,
+        time
+    hs-source-dirs:   examples
+    default-language: GHC2021
+
 test-suite hhlo-test
     import:           warnings
     type:             exitcode-stdio-1.0
@@ -354,6 +379,9 @@ test-suite hhlo-test
         Test.Runtime.Async
         Test.Runtime.Errors
         Test.Utils
+        Test.Runtime.EndToEndGPU
+        Test.Runtime.BufferGPU
+        Test.Runtime.AsyncGPU
     build-depends:
         base,
         hhlo,

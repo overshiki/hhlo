@@ -392,3 +392,178 @@ PJRT_Error* hhlo_pjrt_error_destroy(PJRT_Api* api, PJRT_Error* error) {
     api->PJRT_Error_Destroy(&args);
     return NULL;
 }
+
+// ---------------------------------------------------------------------------
+// Device enumeration
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_client_addressable_device_count(PJRT_Api* api,
+                                                       PJRT_Client* client,
+                                                       size_t* out_count) {
+    PJRT_Client_AddressableDevices_Args args = {0};
+    args.struct_size = PJRT_Client_AddressableDevices_Args_STRUCT_SIZE;
+    args.client = client;
+    PJRT_Error* err = api->PJRT_Client_AddressableDevices(&args);
+    if (err == NULL) {
+        *out_count = args.num_addressable_devices;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_client_addressable_device(PJRT_Api* api,
+                                                 PJRT_Client* client,
+                                                 size_t index,
+                                                 PJRT_Device** out_device) {
+    PJRT_Client_AddressableDevices_Args args = {0};
+    args.struct_size = PJRT_Client_AddressableDevices_Args_STRUCT_SIZE;
+    args.client = client;
+    PJRT_Error* err = api->PJRT_Client_AddressableDevices(&args);
+    if (err != NULL) {
+        return err;
+    }
+    if (index >= args.num_addressable_devices) {
+        *out_device = NULL;
+        return NULL;
+    }
+    *out_device = args.addressable_devices[index];
+    return NULL;
+}
+
+PJRT_Error* hhlo_pjrt_device_id(PJRT_Api* api, PJRT_Device* device,
+                                 int* out_id) {
+    PJRT_Device_GetDescription_Args desc_args = {0};
+    desc_args.struct_size = PJRT_Device_GetDescription_Args_STRUCT_SIZE;
+    desc_args.device = device;
+    PJRT_Error* err = api->PJRT_Device_GetDescription(&desc_args);
+    if (err != NULL) {
+        return err;
+    }
+
+    PJRT_DeviceDescription_Id_Args id_args = {0};
+    id_args.struct_size = PJRT_DeviceDescription_Id_Args_STRUCT_SIZE;
+    id_args.device_description = desc_args.device_description;
+    err = api->PJRT_DeviceDescription_Id(&id_args);
+    if (err == NULL) {
+        *out_id = (int) id_args.id;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_device_kind(PJRT_Api* api, PJRT_Device* device,
+                                   const char** out_kind,
+                                   size_t* out_kind_len) {
+    PJRT_Device_GetDescription_Args desc_args = {0};
+    desc_args.struct_size = PJRT_Device_GetDescription_Args_STRUCT_SIZE;
+    desc_args.device = device;
+    PJRT_Error* err = api->PJRT_Device_GetDescription(&desc_args);
+    if (err != NULL) {
+        return err;
+    }
+
+    PJRT_DeviceDescription_Kind_Args kind_args = {0};
+    kind_args.struct_size = PJRT_DeviceDescription_Kind_Args_STRUCT_SIZE;
+    kind_args.device_description = desc_args.device_description;
+    err = api->PJRT_DeviceDescription_Kind(&kind_args);
+    if (err == NULL) {
+        *out_kind = kind_args.device_kind;
+        *out_kind_len = kind_args.device_kind_size;
+    }
+    return err;
+}
+
+// ---------------------------------------------------------------------------
+// Device-aware buffer creation
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_buffer_from_host_on_device(PJRT_Api* api,
+                                                  PJRT_Client* client,
+                                                  PJRT_Device* device,
+                                                  const void* data,
+                                                  PJRT_Buffer_Type type,
+                                                  const int64_t* dims,
+                                                  size_t num_dims,
+                                                  PJRT_Buffer** out_buffer) {
+    PJRT_Client_BufferFromHostBuffer_Args args = {0};
+    args.struct_size = PJRT_Client_BufferFromHostBuffer_Args_STRUCT_SIZE;
+    args.client = client;
+    args.data = data;
+    args.type = type;
+    args.dims = dims;
+    args.num_dims = num_dims;
+    args.byte_strides = NULL;
+    args.num_byte_strides = 0;
+    args.host_buffer_semantics = PJRT_HostBufferSemantics_kImmutableOnlyDuringCall;
+    args.device = device;
+    args.memory = NULL;
+    args.device_layout = NULL;
+    args.done_with_host_buffer = NULL;
+    args.buffer = NULL;
+
+    PJRT_Error* err = api->PJRT_Client_BufferFromHostBuffer(&args);
+    if (err == NULL) {
+        *out_buffer = args.buffer;
+    }
+    return err;
+}
+
+// ---------------------------------------------------------------------------
+// Async D2H
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_buffer_to_host_async(PJRT_Api* api, PJRT_Buffer* buffer,
+                                            void* dst, size_t dst_size,
+                                            PJRT_Event** out_event) {
+    PJRT_Buffer_ToHostBuffer_Args args = {0};
+    args.struct_size = PJRT_Buffer_ToHostBuffer_Args_STRUCT_SIZE;
+    args.src = buffer;
+    args.host_layout = NULL;
+    args.dst = dst;
+    args.dst_size = dst_size;
+    args.event = NULL;
+
+    PJRT_Error* err = api->PJRT_Buffer_ToHostBuffer(&args);
+    if (err == NULL && out_event != NULL) {
+        *out_event = args.event;
+    }
+    return err;
+}
+
+// ---------------------------------------------------------------------------
+// Device-aware execution
+// ---------------------------------------------------------------------------
+
+PJRT_Error* hhlo_pjrt_execute_on_device(PJRT_Api* api,
+                                         PJRT_LoadedExecutable* exec,
+                                         size_t num_args, PJRT_Buffer** args_in,
+                                         PJRT_Device* execute_device,
+                                         size_t max_outputs,
+                                         PJRT_Buffer** out_outputs,
+                                         size_t* out_num_outputs) {
+    PJRT_ExecuteOptions options = {0};
+    options.struct_size = PJRT_ExecuteOptions_STRUCT_SIZE;
+
+    PJRT_Buffer* const* arg_list = (PJRT_Buffer* const*) args_in;
+    PJRT_Buffer** output_list = out_outputs;
+
+    PJRT_LoadedExecutable_Execute_Args exec_args = {0};
+    exec_args.struct_size = PJRT_LoadedExecutable_Execute_Args_STRUCT_SIZE;
+    exec_args.executable = exec;
+    exec_args.options = &options;
+    exec_args.argument_lists = &arg_list;
+    exec_args.num_devices = 1;
+    exec_args.num_args = num_args;
+    exec_args.output_lists = &output_list;
+    exec_args.device_complete_events = NULL;
+    exec_args.execute_device = execute_device;
+
+    PJRT_Error* err = api->PJRT_LoadedExecutable_Execute(&exec_args);
+    if (err == NULL) {
+        size_t n = 0;
+        for (size_t i = 0; i < max_outputs; ++i) {
+            if (out_outputs[i] != NULL) n++;
+            else break;
+        }
+        *out_num_outputs = n;
+    }
+    return err;
+}

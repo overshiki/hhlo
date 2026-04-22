@@ -2,7 +2,7 @@
 
 HHLO is a Haskell library and runtime for building, compiling, and executing machine learning programs targeting [StableHLO](https://github.com/openxla/stablehlo), the portable, versioned intermediate representation of the [OpenXLA](https://openxla.org/) ecosystem.
 
-Instead of replicating JAX's Python-based tracing infrastructure, HHLO generates StableHLO MLIR text directly from Haskell and compiles it to CPU (and eventually GPU/TPU) via the [PJRT](https://github.com/openxla/xla/blob/main/xla/pjrt/c/pjrt_c_api.h) plugin interface.
+Instead of replicating JAX's Python-based tracing infrastructure, HHLO generates StableHLO MLIR text directly from Haskell and compiles it to **CPU or GPU** via the [PJRT](https://github.com/openxla/xla/blob/main/xla/pjrt/c/pjrt_c_api.h) plugin interface.
 
 ---
 
@@ -18,13 +18,21 @@ HHLO is structured in four layers:
 ├─────────────────────────────────────┤
 │  Pretty Printer (HHLO.IR.Pretty)    │  Emits StableHLO MLIR text
 ├─────────────────────────────────────┤
-│  PJRT Runtime (HHLO.Runtime.*)      │  Compile → Execute on device
+│  PJRT Runtime (HHLO.Runtime.*)      │  Compile → Execute on CPU or GPU
 └─────────────────────────────────────┘
 ```
 
 **Text Emission + PJRT**
 
 The library emits StableHLO MLIR text directly and hands it to `PJRT_Client_Compile`. This is the same path used by JAX's C++ backend and avoids the heavy dependency of building LLVM/MLIR from source.
+
+**Phantom Types**
+
+Every tensor carries its shape and dtype as phantom type parameters:
+```haskell
+Tensor '[2, 3] 'F32   -- 2×3 matrix of Float32
+```
+Matmul, broadcast, and conv shapes are checked at compile time via type families.
 
 **ForeignPtr Finalizers**
 
@@ -37,6 +45,15 @@ The runtime queries the compiled executable for its actual number of outputs via
 **Async Execution**
 
 `HHLO.Runtime.Async` provides true non-blocking execution: `executeAsync` returns buffer handles immediately, `bufferReady` polls for completion, and `awaitBuffers` blocks until device-side computation finishes.
+
+**Device Enumeration & Selection**
+
+`HHLO.Runtime.Device` lets you discover and select specific GPUs at runtime:
+```haskell
+addressableDevices api client        -- list all devices
+deviceKind api dev                   -- "cpu" or "NVIDIA GeForce RTX 5090"
+defaultGPUDevice api client          -- first non-CPU device
+```
 
 ---
 
@@ -51,7 +68,7 @@ The runtime queries the compiled executable for its actual number of outputs via
 
 ### Download PJRT Plugins
 
-Run the provided script to download prebuilt PJRT CPU plugin(s):
+Run the provided script to download prebuilt PJRT plugins:
 
 ```bash
 ./pjrt_script.sh
@@ -71,7 +88,36 @@ This compiles the library, the demo, the examples, and the test suite.
 
 ## Usage
 
-### EDSL Quick Start
+### CPU (works out of the box)
+
+```bash
+cabal run example-add
+cabal test
+```
+
+### GPU (requires runtime libraries)
+
+The PJRT CUDA plugin depends on NVIDIA runtime libraries: **cuDNN**, **NCCL**, and **NVSHMEM**. These are commonly available via conda, pip, or system packages.
+
+If you already have them (e.g. via PyTorch or JAX installations), simply run:
+
+```bash
+./setup_gpu_env.sh
+source ~/.bashrc
+```
+
+This idempotent script auto-discovers the libraries and appends them to `~/.bashrc`. After that, GPU examples work directly:
+
+```bash
+cabal run example-gpu-add
+cabal run example-gpu-matmul-bench
+```
+
+> **Note:** If `setup_gpu_env.sh` cannot find the libraries, install them first (see `doc/cuda-runtime-installation.md` for a manual installation guide from NVIDIA's website).
+
+---
+
+## EDSL Quick Start
 
 ```haskell
 {-# LANGUAGE DataKinds #-}
@@ -113,7 +159,7 @@ module {
 ### Running the Demo
 
 ```bash
-LD_LIBRARY_PATH=deps/pjrt:$LD_LIBRARY_PATH cabal run hhlo-demo
+cabal run hhlo-demo
 ```
 
 The demo builds a `stablehlo.add` program via the EDSL, compiles it with PJRT CPU, creates F32 input buffers, executes, and reads back the result:
@@ -129,46 +175,66 @@ SUCCESS: Results match expected values!
 
 ### Running Examples
 
-Four standalone examples are provided in `examples/`:
+Standalone examples are provided in `examples/`:
 
-| Example | Command | Description |
-|---------|---------|-------------|
-| Element-wise add | `cabal run example-add` | `c = a + b` on 2×2 matrices |
-| Matrix multiply | `cabal run example-matmul` | 2×3 @ 3×2 matmul |
-| Chained ops | `cabal run example-chain-ops` | `(a + b) * (a - b)` |
-| Async execution | `cabal run example-async` | `relu(a) + b` with `executeAsync` + `awaitBuffers` |
-| MLP forward pass | `cabal run example-mlp` | 2-layer MLP: `linear -> relu -> linear` |
-| Batched MLP | `cabal run example-mlp-batched` | Batched 2-layer MLP with `linearBatched` |
-| Reduction | `cabal run example-reduce` | `reduceSum` over all dimensions |
-| Tuple return | `cabal run example-tuple` | Multi-result `func.func` (MLIR print-only) |
-
-All examples must be run with `LD_LIBRARY_PATH` pointing to the PJRT plugins:
-
-```bash
-export LD_LIBRARY_PATH=deps/pjrt:$LD_LIBRARY_PATH
-cabal run example-add
-cabal run example-matmul
-cabal run example-chain-ops
-cabal run example-async
-cabal run example-mlp
-cabal run example-mlp-batched
-cabal run example-reduce
-cabal run example-tuple
-```
+| # | Command | Description |
+|---|---------|-------------|
+| 1 | `cabal run example-add` | Element-wise `c = a + b` |
+| 2 | `cabal run example-matmul` | 2×3 @ 3×2 matrix multiply |
+| 3 | `cabal run example-chain-ops` | `(a + b) * (a - b)` |
+| 4 | `cabal run example-async` | Async `executeAsync` + `relu` |
+| 5 | `cabal run example-mlp` | 2-layer MLP |
+| 6 | `cabal run example-mlp-batched` | Batched MLP |
+| 7 | `cabal run example-tuple` | Multi-result `func.func` (MLIR print-only) |
+| 8 | `cabal run example-reduce` | `reduceSum` over all dimensions |
+| 9 | `cabal run example-softmax` | 1-D and batched 2-D softmax |
+| 10 | `cabal run example-conv2d` | NHWC conv2d |
+| 11 | `cabal run example-batch-norm` | Batch norm inference |
+| 12 | `cabal run example-while` | `whileLoop` count-up |
+| 13 | `cabal run example-conditional` | `conditional` if-then-else |
+| 14 | `cabal run example-gather` | `gather` rows from matrix |
+| 15 | `cabal run example-scatter` | `scatter` replace into vector |
+| 16 | `cabal run example-slice` | `slice` sub-array extraction |
+| 17 | `cabal run example-pad` | `pad` with edge/interior padding |
+| 18 | `cabal run example-dynamic-slice` | `dynamicSlice` runtime indices |
+| 19 | `cabal run example-sort` | `sort` 1-D ascending |
+| 20 | `cabal run example-select` | Element-wise ternary `select` |
+| 21 | `cabal run example-map` | `map` with custom computation |
+| 22 | `cabal run example-new-ops-smoke-test` | Smoke test for newer ops |
+| 23 | `cabal run example-resnet` | ResNet-18 toy (8×8 input) |
+| 24 | `cabal run example-alexnet` | AlexNet toy (16×16 input) |
+| 25 | `cabal run example-transformer` | Transformer encoder (1×4×16) |
+| 26 | `cabal run example-unet` | UNet segmentation toy (16×16) |
+| **27** | `cabal run example-gpu-add` | **GPU smoke test** |
+| **28** | `cabal run example-gpu-matmul-bench` | **GPU 4096×4096 benchmark** |
 
 ---
 
 ## Tests
 
+### CPU Tests (default)
+
 ```bash
 cabal test
 ```
 
-The test suite (`hhlo-test`) contains **115 tests** across three tiers:
+Runs **115 tests** across three tiers:
 
 - **Tier 1 — Golden tests** — Verify rendered MLIR text for EDSL ops, IR constructs, NN layers, and control flow.
-- **Tier 2 — End-to-end runtime tests** — Load the PJRT CPU plugin, compile StableHLO programs, execute them, and verify numerical results. Covers arithmetic, matmul, reductions, data movement (slice, pad, gather, scatter, conditional), and NN ops (conv2d, softmax, batch norm, layer norm, gelu, global average pooling).
+- **Tier 2 — End-to-end runtime tests** — Load the PJRT CPU plugin, compile StableHLO programs, execute them, and verify numerical results. Covers arithmetic, matmul, reductions, data movement, and NN ops.
 - **Tier 3 — Runtime integration tests** — Buffer metadata queries, async execution, and error handling.
+
+### GPU Tests
+
+```bash
+HHLO_TEST_GPU=1 cabal test
+```
+
+Runs the full 115 CPU tests **plus** 5 additional GPU integration tests:
+
+- `EndToEnd.GPU` — GPU availability and device enumeration
+- `Runtime.BufferGPU` — Buffer round-trip and metadata queries on GPU
+- `Runtime.AsyncGPU` — Async execution and `bufferReady` polling on GPU
 
 Sample output:
 ```
@@ -184,8 +250,14 @@ HHLO Tests
     buffer round-trip f32:            OK
   Runtime.Async
     buffer ready after sync execute:  OK (0.02s)
+  EndToEnd.GPU
+    gpu available:                    OK
+  Runtime.BufferGPU
+    gpu buffer round-trip f32:        OK
+  Runtime.AsyncGPU
+    gpu executeAsync + await:         OK
 
-All 115 tests passed (0.77s)
+All 120 tests passed (16.27s)
 ```
 
 ---
@@ -196,33 +268,30 @@ All 115 tests passed (0.77s)
 .
 ├── app/                    # hhlo-demo executable
 ├── cbits/                  # C shim around PJRT C API
-│   └── pjrt_shim.c
+│   ├── pjrt_c_api.h        # Upstream PJRT header
+│   ├── pjrt_shim.c         # Thin wrapper exposing flat C functions
+│   └── pjrt_shim.h         # C header for the shim
 ├── deps/
 │   └── pjrt/               # Downloaded PJRT plugins (.so files)
+│       └── lib_symlinks/   # Compatibility symlinks for missing library versions
 ├── doc/                    # Architecture and design documents
-├── examples/               # Standalone example programs
-│   ├── 01-add.hs
-│   ├── 02-matmul.hs
-│   ├── 03-chain-ops.hs
-│   ├── 04-async.hs
-│   ├── 05-mlp.hs
-│   ├── 06-mlp-batched.hs
-│   ├── 07-tuple.hs
-│   └── 08-reduce.hs
+├── examples/               # Standalone example programs (01–28)
 ├── src/HHLO/
 │   ├── Core/Types.hs       # DType, Shape, HostType type families
 │   ├── IR/
 │   │   ├── AST.hs          # MLIR AST (Operation, Function, Module)
-│   │   ├── Builder.hs      # Stateful Builder monad
+│   │   ├── Builder.hs      # Stateful Builder monad + Tensor/Tuple GADTs
 │   │   └── Pretty.hs       # MLIR text pretty-printer
-│   ├── EDSL/Ops.hs         # Type-safe frontend ops
+│   ├── EDSL/Ops.hs         # Type-safe frontend ops (50+ ops)
 │   └── Runtime/
 │       ├── PJRT/
 │       │   ├── FFI.hs      # C FFI declarations
 │       │   ├── Types.hs    # Opaque pointer newtypes + buffer type constants
-│       │   └── Error.hs    # PJRT error handling
+│       │   ├── Error.hs    # PJRT error handling
+│       │   └── Plugin.hs   # Backend-agnostic plugin loading (withPJRT)
+│       ├── Device.hs       # Device enumeration & selection
 │       ├── Compile.hs      # MLIR → PJRT executable
-│       ├── Execute.hs      # Synchronous execution
+│       ├── Execute.hs      # Synchronous + device-targeted execution
 │       ├── Async.hs        # Non-blocking execution with PJRT_Event
 │       └── Buffer.hs       # Host↔device buffer transfers + metadata queries
 ├── test/
@@ -235,19 +304,18 @@ All 115 tests passed (0.77s)
 │   │   │   ├── PrettyNN.hs
 │   │   │   └── PrettyControlFlow.hs
 │   │   ├── Runtime/
-│   │   │   ├── EndToEndArithmetic.hs
-│   │   │   ├── EndToEndMatmul.hs
-│   │   │   ├── EndToEndDataMovement.hs
-│   │   │   ├── EndToEndNN.hs
-│   │   │   ├── EndToEndReductions.hs
-│   │   │   ├── EndToEndShape.hs
+│   │   │   ├── EndToEnd*.hs       # CPU E2E test modules
+│   │   │   ├── EndToEndGPU.hs     # GPU availability test
 │   │   │   ├── Buffer.hs
+│   │   │   ├── BufferGPU.hs       # GPU buffer integration tests
 │   │   │   ├── Async.hs
+│   │   │   ├── AsyncGPU.hs        # GPU async tests
 │   │   │   └── Errors.hs
 │   │   └── Utils.hs
 │   └── Main.hs
 ├── hhlo.cabal
-├── pjrt_script.sh
+├── pjrt_script.sh          # Downloads PJRT plugins
+├── setup_gpu_env.sh        # Auto-configures LD_LIBRARY_PATH for GPU
 └── README.md
 ```
 
@@ -259,12 +327,9 @@ The `doc/` directory contains detailed design documents:
 
 | Document | Contents |
 |----------|----------|
-| `design.md` | High-level system design and goals |
-| `implementation-design.md` | Feasibility analysis and roadmap |
-| `understanding-pjrt.md` | Deep dive into PJRT C API vtable patterns |
-| `understanding-zml-pjrt-artifacts.md` | Prebuilt artifact sources and versioning |
-| `text-emission-vs-mlir-hs.md` | Why text emission was chosen over `mlir-hs` |
-| `progress-and-remaining-work.md` | Current status and backlog |
+| `implementation-design.md` | Four-layer architecture and design decisions |
+| `progress-and-remaining-work.md` | Current status, completed features, and backlog |
+| `test-suite-documentation.md` | Test catalog and tier descriptions |
 
 ---
 

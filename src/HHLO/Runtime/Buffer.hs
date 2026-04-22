@@ -2,7 +2,9 @@
 
 module HHLO.Runtime.Buffer
     ( toDevice
+    , toDeviceOn
     , fromDevice
+    , fromDeviceAsync
     , toDeviceF32
     , fromDeviceF32
     -- * Buffer metadata queries
@@ -46,12 +48,29 @@ toDevice api client vec dims dtype =
                     return ()
                 return $ PJRTBuffer fp
 
+-- | Create a PJRT buffer on a specific device from a host 'Vector'.
+toDeviceOn :: Storable a
+           => PJRTApi -> PJRTClient -> PJRTDevice -> Vector a -> [Int64] -> CInt -> IO PJRTBuffer
+toDeviceOn api client dev vec dims dtype =
+    V.unsafeWith vec $ \ptr -> do
+        withArrayLen (map fromIntegral dims :: [Int64]) $ \n dimArr -> do
+            alloca $ \bufPtrPtr -> do
+                checkError (unApi api) $ do
+                    c_pjrtBufferFromHostOnDevice (unApi api) (unClient client) (unDevice dev)
+                        (castPtr ptr) dtype dimArr (fromIntegral n) bufPtrPtr
+                rawPtr <- peek bufPtrPtr
+                fp <- Conc.newForeignPtr rawPtr $ do
+                    _ <- c_pjrtBufferDestroy (unApi api) rawPtr
+                    return ()
+                return $ PJRTBuffer fp
+
 -- | Convenience: create an F32 buffer from a Float vector.
 toDeviceF32 :: PJRTApi -> PJRTClient -> Vector Float -> [Int64] -> IO PJRTBuffer
 toDeviceF32 api client vec dims = toDevice api client vec dims bufferTypeF32
 
 -- | Copy a PJRT buffer back to a host 'Vector'.
 -- The caller must know the expected number of elements.
+-- This is synchronous: it blocks until the data is ready on the host.
 fromDevice :: forall a. Storable a => PJRTApi -> PJRTBuffer -> Int -> IO (Vector a)
 fromDevice api buf numElems = do
     let totalBytes = numElems * sizeOf (undefined :: a)
@@ -61,6 +80,18 @@ fromDevice api buf numElems = do
             (castPtr dstPtr) (fromIntegral totalBytes) nullPtr
     fptr <- newForeignPtr finalizerFree dstPtr
     return $ V.unsafeFromForeignPtr0 fptr numElems
+
+-- | Initiate an asynchronous device-to-host copy into a caller-provided
+-- host buffer.  Returns a 'PJRTEvent' that signals when 'dst' is safe to
+-- read.  The caller is responsible for allocating 'dst', awaiting the
+-- event, and destroying the event.
+fromDeviceAsync :: PJRTApi -> PJRTBuffer -> Ptr () -> Int -> IO (Ptr PJRTEvent)
+fromDeviceAsync api buf dstPtr totalBytes =
+    alloca $ \eventPtrPtr -> do
+        checkError (unApi api) $ do
+            c_pjrtBufferToHostAsync (unApi api) (unBuf buf)
+                (castPtr dstPtr) (fromIntegral totalBytes) eventPtrPtr
+        peek eventPtrPtr
 
 -- | Convenience: read an F32 buffer back as a Float vector.
 fromDeviceF32 :: PJRTApi -> PJRTBuffer -> Int -> IO (Vector Float)
@@ -100,6 +131,9 @@ unApi (PJRTApi p) = p
 
 unClient :: PJRTClient -> Ptr PJRTClient
 unClient (PJRTClient p) = p
+
+unDevice :: PJRTDevice -> Ptr PJRTDevice
+unDevice (PJRTDevice p) = p
 
 unBuf :: PJRTBuffer -> Ptr PJRTBuffer
 unBuf (PJRTBuffer fp) = unsafeForeignPtrToPtr fp

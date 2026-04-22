@@ -26,6 +26,22 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_client_destroy"
     c_pjrtClientDestroy :: Ptr PJRTApi -> Ptr PJRTClient -> IO (Ptr PJRTError)
 
 -- ---------------------------------------------------------------------------
+-- Device enumeration
+-- ---------------------------------------------------------------------------
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_client_addressable_device_count"
+    c_pjrtClientAddressableDeviceCount :: Ptr PJRTApi -> Ptr PJRTClient -> Ptr CSize -> IO (Ptr PJRTError)
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_client_addressable_device"
+    c_pjrtClientAddressableDevice :: Ptr PJRTApi -> Ptr PJRTClient -> CSize -> Ptr (Ptr PJRTDevice) -> IO (Ptr PJRTError)
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_device_id"
+    c_pjrtDeviceId :: Ptr PJRTApi -> Ptr PJRTDevice -> Ptr CInt -> IO (Ptr PJRTError)
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_device_kind"
+    c_pjrtDeviceKind :: Ptr PJRTApi -> Ptr PJRTDevice -> Ptr CString -> Ptr CSize -> IO (Ptr PJRTError)
+
+-- ---------------------------------------------------------------------------
 -- Compilation
 -- ---------------------------------------------------------------------------
 
@@ -57,6 +73,17 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_execute"
                   -> Ptr CSize            -- out_num_outputs
                   -> IO (Ptr PJRTError)
 
+foreign import ccall "pjrt_shim.h hhlo_pjrt_execute_on_device"
+    c_pjrtExecuteOnDevice :: Ptr PJRTApi
+                          -> Ptr PJRTExecutable
+                          -> CSize                -- num_args
+                          -> Ptr (Ptr PJRTBuffer) -- args
+                          -> Ptr PJRTDevice       -- execute_device
+                          -> CSize                -- max_outputs
+                          -> Ptr (Ptr PJRTBuffer) -- out_outputs
+                          -> Ptr CSize             -- out_num_outputs
+                          -> IO (Ptr PJRTError)
+
 -- ---------------------------------------------------------------------------
 -- Buffers
 -- ---------------------------------------------------------------------------
@@ -71,6 +98,17 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_from_host"
                          -> Ptr (Ptr PJRTBuffer)
                          -> IO (Ptr PJRTError)
 
+foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_from_host_on_device"
+    c_pjrtBufferFromHostOnDevice :: Ptr PJRTApi
+                                 -> Ptr PJRTClient
+                                 -> Ptr PJRTDevice          -- device
+                                 -> Ptr ()                  -- data
+                                 -> CInt                    -- dtype
+                                 -> Ptr Int64               -- dims
+                                 -> CSize                   -- num_dims
+                                 -> Ptr (Ptr PJRTBuffer)
+                                 -> IO (Ptr PJRTError)
+
 foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_to_host"
     c_pjrtBufferToHost :: Ptr PJRTApi
                        -> Ptr PJRTBuffer
@@ -78,6 +116,14 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_to_host"
                        -> CSize                -- dst_size
                        -> Ptr (Ptr PJRTEvent)  -- out_event
                        -> IO (Ptr PJRTError)
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_to_host_async"
+    c_pjrtBufferToHostAsync :: Ptr PJRTApi
+                            -> Ptr PJRTBuffer
+                            -> Ptr ()               -- dst
+                            -> CSize                -- dst_size
+                            -> Ptr (Ptr PJRTEvent)  -- out_event
+                            -> IO (Ptr PJRTError)
 
 foreign import ccall "pjrt_shim.h hhlo_pjrt_buffer_destroy"
     c_pjrtBufferDestroy :: Ptr PJRTApi -> Ptr PJRTBuffer -> IO (Ptr PJRTError)

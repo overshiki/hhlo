@@ -1,5 +1,6 @@
 module HHLO.Runtime.Execute
     ( execute
+    , executeOn
     , executeAsync
     ) where
 
@@ -41,6 +42,30 @@ execute api exec buffers = do
                     else do
                         withErrorMessage (unApi api) err >>= throwIO . PJRTException
 
+-- | Execute on a specific device.
+executeOn :: PJRTApi -> PJRTExecutable -> PJRTDevice -> [PJRTBuffer] -> IO [PJRTBuffer]
+executeOn api exec dev buffers = do
+    numOutputs <- alloca $ \numOutPtr -> do
+        err <- c_pjrtExecutableNumOutputs (unApi api) (unExec exec) numOutPtr
+        if err == nullPtr
+            then peek numOutPtr
+            else do
+                withErrorMessage (unApi api) err >>= throwIO . PJRTException
+    withArrayLen (map unBuffer buffers) $ \n bufArr -> do
+        allocaArray (fromIntegral numOutputs) $ \outArr -> do
+            pokeArray outArr (replicate (fromIntegral numOutputs) nullPtr)
+            alloca $ \numOutPtr -> do
+                err <- c_pjrtExecuteOnDevice (unApi api) (unExec exec)
+                        (fromIntegral n) bufArr (unDevice dev)
+                        numOutputs outArr numOutPtr
+                if err == nullPtr
+                    then do
+                        actualNumOut <- peek numOutPtr
+                        outPtrs <- peekArray (fromIntegral actualNumOut) outArr
+                        mapM (wrapBuffer api) outPtrs
+                    else do
+                        withErrorMessage (unApi api) err >>= throwIO . PJRTException
+
 -- | Execute asynchronously. Returns immediately with output buffers
 -- that may not yet contain valid data. The caller must synchronize
 -- via the buffer's ready event or by copying to host.
@@ -55,6 +80,9 @@ unExec (PJRTExecutable fp) = unsafeForeignPtrToPtr fp
 
 unBuffer :: PJRTBuffer -> Ptr PJRTBuffer
 unBuffer (PJRTBuffer fp) = unsafeForeignPtrToPtr fp
+
+unDevice :: PJRTDevice -> Ptr PJRTDevice
+unDevice (PJRTDevice p) = p
 
 -- | Wrap a raw PJRT buffer pointer in a 'ForeignPtr' with a finalizer.
 wrapBuffer :: PJRTApi -> Ptr PJRTBuffer -> IO PJRTBuffer
