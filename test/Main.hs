@@ -12,6 +12,7 @@ import qualified Test.Runtime.EndToEndMatmul as Matmul
 import qualified Test.Runtime.EndToEndNN as NN
 import qualified Test.Runtime.EndToEndReductions as Reductions
 import qualified Test.Runtime.EndToEndDataMovement as DataMovement
+import qualified Test.Runtime.EndToEndMultiValue as MultiValue
 import qualified Test.Runtime.Buffer as Buffer
 import qualified Test.Runtime.Async as Async
 import qualified Test.Runtime.Errors as Errors
@@ -42,6 +43,7 @@ main = do
         , NN.tests
         , Reductions.tests
         , DataMovement.tests
+        , MultiValue.tests
         , Buffer.tests
         , Async.tests
         , Errors.tests

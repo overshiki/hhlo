@@ -3,6 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 module HHLO.IR.Builder
     ( Builder
@@ -14,7 +15,9 @@ module HHLO.IR.Builder
     , Tuple(..)
     , TupleBuilder(..)
     , emitOp
+    , emitOpN
     , emitOpRegions
+    , emitOpRegionsN
     , emitReduce
     , emitReturn
     , runBlockBuilder
@@ -138,23 +141,39 @@ moduleFromBuilderT name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
     in Module [runBuilderT name renamed action]
 
--- | Emit a generic operation into the builder.
+-- | Emit a generic single-result operation into the builder.
 -- The caller must provide the operand types so that the pretty-printer
 -- can emit the full function type @(operandTypes) -> resultType@.
 emitOp :: Text -> [ValueId] -> [TensorType] -> [Attribute] -> TensorType -> Builder ValueId
 emitOp name operands operandTypes attrs resultType =
-    emitOpRegions name operands operandTypes attrs [] resultType
+    emitOpN name operands operandTypes attrs [resultType] >>= \case
+        [vid] -> return vid
+        _     -> error "emitOp: expected exactly one result"
 
--- | Emit an operation that carries nested regions.
+-- | Emit a single-result operation that carries nested regions.
 emitOpRegions :: Text -> [ValueId] -> [TensorType] -> [Attribute] -> [Region] -> TensorType -> Builder ValueId
-emitOpRegions name operands operandTypes attrs regions resultType = do
+emitOpRegions name operands operandTypes attrs regions resultType =
+    emitOpRegionsN name operands operandTypes attrs regions [resultType] >>= \case
+        [vid] -> return vid
+        _     -> error "emitOpRegions: expected exactly one result"
+
+-- | Emit a multi-result operation into the builder.
+-- Returns a list of fresh 'ValueId's, one per result type.
+emitOpN :: Text -> [ValueId] -> [TensorType] -> [Attribute] -> [TensorType] -> Builder [ValueId]
+emitOpN name operands operandTypes attrs resultTypes =
+    emitOpRegionsN name operands operandTypes attrs [] resultTypes
+
+-- | Emit a multi-result operation that carries nested regions.
+emitOpRegionsN :: Text -> [ValueId] -> [TensorType] -> [Attribute] -> [Region] -> [TensorType] -> Builder [ValueId]
+emitOpRegionsN name operands operandTypes attrs regions resultTypes = do
     n <- gets bsNextId
-    let vid = ValueId n
+    let numResults = length resultTypes
+        vids = map ValueId [n .. n + numResults - 1]
     modify $ \s -> s
-        { bsNextId = n + 1
-        , bsOps = Operation name operands operandTypes attrs regions vid resultType : bsOps s
+        { bsNextId = n + numResults
+        , bsOps = Operation name operands operandTypes attrs regions vids resultTypes : bsOps s
         }
-    return vid
+    return vids
 
 -- | Run a nested builder action to produce a single 'Block'.
 --
@@ -177,7 +196,7 @@ runBlockBuilder argTypes (Builder inner) = do
 -- but the pretty-printer special-cases this op anyway.
 emitReturn :: [ValueId] -> [TensorType] -> Builder ()
 emitReturn vids types = do
-    _ <- emitOp "stablehlo.return" vids types [] (TensorType [] F32)
+    _ <- emitOpN "stablehlo.return" vids types [] [TensorType [] F32]
     return ()
 
 -- | Emit a 'stablehlo.reduce' operation using the @applies@ shorthand.
@@ -193,18 +212,14 @@ emitReturn vids types = do
 --        across dimensions = [0, 1] : (input_type, init_type) -> result_type
 -- @
 emitReduce :: ValueId -> TensorType -> ValueId -> TensorType -> [Int] -> Text -> TensorType -> Builder ValueId
-emitReduce input inType init_ initType dims appliesOp resultType = do
-    n <- gets bsNextId
-    let vid = ValueId n
-    modify $ \s -> s
-        { bsNextId = n + 1
-        , bsOps = Operation "stablehlo.reduce"
-                    [input, init_] [inType, initType]
-                    [ AttrIntList "dimensions" (map fromIntegral dims)
-                    , AttrString "applies" appliesOp
-                    ] [] vid resultType : bsOps s
-        }
-    return vid
+emitReduce input inType init_ initType dims appliesOp resultType =
+    emitOpN "stablehlo.reduce"
+        [input, init_] [inType, initType]
+        [ AttrIntList "dimensions" (map fromIntegral dims)
+        , AttrString "applies" appliesOp
+        ] [resultType] >>= \case
+            [vid] -> return vid
+            _     -> error "emitReduce: expected exactly one result"
 
 -- | Declare a function argument with an auto-generated name.
 -- The returned 'Tensor' carries a negative 'ValueId' so that the
@@ -231,4 +246,8 @@ instance KnownDType 'I32  where dtypeVal _ = I32
 instance KnownDType 'I64  where dtypeVal _ = I64
 instance KnownDType 'I8   where dtypeVal _ = I8
 instance KnownDType 'I16  where dtypeVal _ = I16
+instance KnownDType 'UI8  where dtypeVal _ = UI8
+instance KnownDType 'UI16 where dtypeVal _ = UI16
+instance KnownDType 'UI32 where dtypeVal _ = UI32
+instance KnownDType 'UI64 where dtypeVal _ = UI64
 instance KnownDType 'Bool where dtypeVal _ = Bool

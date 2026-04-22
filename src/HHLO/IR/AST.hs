@@ -63,15 +63,15 @@ data Block = Block
 newtype Region = Region { unRegion :: [Block] }
     deriving (Eq, Show)
 
--- | A single StableHLO operation.
+-- | A StableHLO operation.  Supports multiple results.
 data Operation = Operation
     { opName         :: !Text
     , opOperands     :: ![ValueId]
     , opOperandTypes :: ![TensorType]
     , opAttributes   :: ![Attribute]
     , opRegions      :: ![Region]
-    , opResult       :: !ValueId
-    , opResultType   :: !TensorType
+    , opResults      :: ![ValueId]
+    , opResultTypes  :: ![TensorType]
     }
     deriving (Eq, Show)
 

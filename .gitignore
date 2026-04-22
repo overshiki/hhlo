@@ -1,3 +1,5 @@
 dist-newstyle
 deps
 devlog
+*.o
+*.hi

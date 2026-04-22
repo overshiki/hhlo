@@ -70,6 +70,36 @@ executeReplicas api exec
     ]
 ```
 
+**Multi-Result Operations**
+
+The AST `Operation` type supports multiple results, enabling ops like `stablehlo.rng_bit_generator` and multi-value control flow:
+```haskell
+-- Two-result operation
+(newState, output) <- rngBitGenerator state
+```
+
+**Multi-Value Control Flow**
+
+`whileLoop2` / `conditional2` carry multiple typed tensors through loops and conditionals without manual packing:
+```haskell
+-- Loop with two accumulators: counter and running sum
+(resultCounter, resultSum) <- whileLoop2 counter0 sum0
+    (\c s -> compare c limit "LT")
+    (\c s -> do
+        cNext <- add c one
+        sNext <- add s cNext
+        returnTuple2 cNext sNext)
+```
+
+**Random Number Generation**
+
+Three RNG primitives are exposed in the EDSL:
+```haskell
+uniform  <- rngUniform a b      -- uniform in [a, b)
+normal   <- rngNormal            -- standard normal (mean 0, std 1)
+(newSt, bits) <- rngBitGenerator state   -- Threefry bit generator
+```
+
 ---
 
 ## Installation
@@ -106,9 +136,11 @@ This compiles the library, the demo, the examples, and the test suite.
 ### CPU (works out of the box)
 
 ```bash
-cabal run example-add
+cabal run example-add --flag=examples
 cabal test
 ```
+
+> **Note:** All `example-*` executables are guarded by the `examples` flag in `hhlo.cabal` (defaults to `False`). Append `--flag=examples` to every `cabal run example-*` command.
 
 ### GPU (requires runtime libraries)
 
@@ -124,9 +156,9 @@ source ~/.bashrc
 This idempotent script auto-discovers the libraries and appends them to `~/.bashrc`. After that, GPU examples work directly:
 
 ```bash
-cabal run example-gpu-add
-cabal run example-gpu-matmul-bench
-cabal run example-multi-gpu-inference
+cabal run example-gpu-add --flag=examples
+cabal run example-gpu-matmul-bench --flag=examples
+cabal run example-multi-gpu-inference --flag=examples
 ```
 
 ---
@@ -193,35 +225,39 @@ Standalone examples are provided in `examples/`:
 
 | # | Command | Description |
 |---|---------|-------------|
-| 1 | `cabal run example-add` | Element-wise `c = a + b` |
-| 2 | `cabal run example-matmul` | 2×3 @ 3×2 matrix multiply |
-| 3 | `cabal run example-chain-ops` | `(a + b) * (a - b)` |
-| 4 | `cabal run example-async` | Async `executeAsync` + `relu` |
-| 5 | `cabal run example-mlp` | 2-layer MLP |
-| 6 | `cabal run example-mlp-batched` | Batched MLP |
-| 7 | `cabal run example-tuple` | Multi-result `func.func` (MLIR print-only) |
-| 8 | `cabal run example-reduce` | `reduceSum` over all dimensions |
-| 9 | `cabal run example-softmax` | 1-D and batched 2-D softmax |
-| 10 | `cabal run example-conv2d` | NHWC conv2d |
-| 11 | `cabal run example-batch-norm` | Batch norm inference |
-| 12 | `cabal run example-while` | `whileLoop` count-up |
-| 13 | `cabal run example-conditional` | `conditional` if-then-else |
-| 14 | `cabal run example-gather` | `gather` rows from matrix |
-| 15 | `cabal run example-scatter` | `scatter` replace into vector |
-| 16 | `cabal run example-slice` | `slice` sub-array extraction |
-| 17 | `cabal run example-pad` | `pad` with edge/interior padding |
-| 18 | `cabal run example-dynamic-slice` | `dynamicSlice` runtime indices |
-| 19 | `cabal run example-sort` | `sort` 1-D ascending |
-| 20 | `cabal run example-select` | Element-wise ternary `select` |
-| 21 | `cabal run example-map` | `map` with custom computation |
-| 22 | `cabal run example-new-ops-smoke-test` | Smoke test for newer ops |
-| 23 | `cabal run example-resnet` | ResNet-18 toy (8×8 input) |
-| 24 | `cabal run example-alexnet` | AlexNet toy (16×16 input) |
-| 25 | `cabal run example-transformer` | Transformer encoder (1×4×16) |
-| 26 | `cabal run example-unet` | UNet segmentation toy (16×16) |
-| **27** | `cabal run example-gpu-add` | **GPU smoke test** |
-| **28** | `cabal run example-gpu-matmul-bench` | **GPU 4096×4096 benchmark** |
-| **29** | `cabal run example-multi-gpu-inference` | **Multi-GPU concurrent matmul** |
+| 1 | `cabal run example-add --flag=examples` | Element-wise `c = a + b` |
+| 2 | `cabal run example-matmul --flag=examples` | 2×3 @ 3×2 matrix multiply |
+| 3 | `cabal run example-chain-ops --flag=examples` | `(a + b) * (a - b)` |
+| 4 | `cabal run example-async --flag=examples` | Async `executeAsync` + `relu` |
+| 5 | `cabal run example-mlp --flag=examples` | 2-layer MLP |
+| 6 | `cabal run example-mlp-batched --flag=examples` | Batched MLP |
+| 7 | `cabal run example-tuple --flag=examples` | Multi-result `func.func` |
+| 8 | `cabal run example-reduce --flag=examples` | `reduceSum` over all dimensions |
+| 9 | `cabal run example-softmax --flag=examples` | 1-D and batched 2-D softmax |
+| 10 | `cabal run example-conv2d --flag=examples` | NHWC conv2d |
+| 11 | `cabal run example-batch-norm --flag=examples` | Batch norm inference |
+| 12 | `cabal run example-while --flag=examples` | `whileLoop` count-up |
+| 13 | `cabal run example-conditional --flag=examples` | `conditional` if-then-else |
+| 14 | `cabal run example-gather --flag=examples` | `gather` rows from matrix |
+| 15 | `cabal run example-scatter --flag=examples` | `scatter` replace into vector |
+| 16 | `cabal run example-slice --flag=examples` | `slice` sub-array extraction |
+| 17 | `cabal run example-pad --flag=examples` | `pad` with edge/interior padding |
+| 18 | `cabal run example-dynamic-slice --flag=examples` | `dynamicSlice` runtime indices |
+| 19 | `cabal run example-sort --flag=examples` | `sort` 1-D ascending |
+| 20 | `cabal run example-select --flag=examples` | Element-wise ternary `select` |
+| 21 | `cabal run example-map --flag=examples` | `map` with custom computation |
+| 22 | `cabal run example-new-ops-smoke-test --flag=examples` | Smoke test for newer ops |
+| 23 | `cabal run example-resnet --flag=examples` | ResNet-18 toy (8×8 input) |
+| 24 | `cabal run example-alexnet --flag=examples` | AlexNet toy (16×16 input) |
+| 25 | `cabal run example-transformer --flag=examples` | Transformer encoder (1×4×16) |
+| 26 | `cabal run example-unet --flag=examples` | UNet segmentation toy (16×16) |
+| 30 | `cabal run example-rng-uniform --flag=examples` | `rngUniform` random floats [0,1) |
+| 31 | `cabal run example-rng-normal --flag=examples` | `rngNormal` standard normal distribution |
+| 32 | `cabal run example-rng-bit-generator --flag=examples` | `rngBitGenerator` Threefry PRNG |
+| 33 | `cabal run example-multi-value-loop --flag=examples` | `whileLoop2` with two loop-carried values |
+| **27** | `cabal run example-gpu-add --flag=examples` | **GPU smoke test** |
+| **28** | `cabal run example-gpu-matmul-bench --flag=examples` | **GPU 4096×4096 benchmark** |
+| **29** | `cabal run example-multi-gpu-inference --flag=examples` | **Multi-GPU concurrent matmul** |
 
 ---
 
@@ -233,7 +269,7 @@ Standalone examples are provided in `examples/`:
 cabal test
 ```
 
-Runs **115 tests** across three tiers:
+Runs **124 tests** across three tiers:
 
 - **Tier 1 — Golden tests** — Verify rendered MLIR text for EDSL ops, IR constructs, NN layers, and control flow.
 - **Tier 2 — End-to-end runtime tests** — Load the PJRT CPU plugin, compile StableHLO programs, execute them, and verify numerical results. Covers arithmetic, matmul, reductions, data movement, and NN ops.
@@ -245,7 +281,7 @@ Runs **115 tests** across three tiers:
 HHLO_TEST_GPU=1 cabal test
 ```
 
-Runs the full 115 CPU tests **plus** 6 additional GPU integration tests:
+Runs the full 124 CPU tests **plus** 6 additional GPU integration tests:
 
 - `EndToEnd.GPU` — GPU availability and device enumeration
 - `Runtime.BufferGPU` — Buffer round-trip and metadata queries on GPU
@@ -275,7 +311,7 @@ HHLO Tests
   Runtime.MultiGPU
     execute replicas on all GPUs:     OK
 
-All 121 tests passed (16.27s)
+All 130 tests passed (16.27s)
 ```
 
 ---
@@ -293,7 +329,7 @@ All 121 tests passed (16.27s)
 │   └── pjrt/               # Downloaded PJRT plugins (.so files)
 │       └── lib_symlinks/   # Compatibility symlinks for missing library versions
 ├── doc/                    # Architecture and design documents
-├── examples/               # Standalone example programs (01–29)
+├── examples/               # Standalone example programs (01–33)
 ├── src/HHLO/
 │   ├── Core/Types.hs       # DType, Shape, HostType type families
 │   ├── IR/

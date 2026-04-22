@@ -32,7 +32,7 @@ tests = testGroup "Pretty"
                     [TensorType [2, 2] F32]
                     [ValueId 2]
                     [ Operation "stablehlo.add" [ValueId 0, ValueId 1]
-                        [TensorType [2, 2] F32, TensorType [2, 2] F32] [] [] (ValueId 2) (TensorType [2, 2] F32)
+                        [TensorType [2, 2] F32, TensorType [2, 2] F32] [] [] [ValueId 2] [TensorType [2, 2] F32]
                     ]
             let expected =
                     "func.func @main(%arg0: tensor<2x2xf32>, %arg1: tensor<2x2xf32>) -> tensor<2x2xf32> {\n"
@@ -44,7 +44,7 @@ tests = testGroup "Pretty"
             let op = Operation "stablehlo.broadcast_in_dim" [ValueId 0]
                     [TensorType [3] F32]
                     [AttrIntList "broadcast_dimensions" [1]]
-                    [] (ValueId 1) (TensorType [2, 3] F32)
+                    [] [ValueId 1] [TensorType [2, 3] F32]
             let rendered = render op
             assertBool "should contain trailing dims" $
                 ", dims = [1]" `T.isInfixOf` rendered
@@ -52,13 +52,13 @@ tests = testGroup "Pretty"
             let op = Operation "stablehlo.compare" [ValueId 0, ValueId 1]
                     [TensorType [2] F32, TensorType [2] F32]
                     [AttrString "comparison_direction" "LT"]
-                    [] (ValueId 2) (TensorType [2] Bool)
+                    [] [ValueId 2] [TensorType [2] Bool]
             let rendered = render op
             assertBool "should contain inline direction" $
                 "\"LT\"" `T.isInfixOf` rendered
         , testCase "return generic form" $ do
             let op = Operation "stablehlo.return" [ValueId 0]
-                    [TensorType [] F32] [] [] (ValueId 0) (TensorType [] F32)
+                    [TensorType [] F32] [] [] [ValueId 0] [TensorType [] F32]
             let rendered = render op
             assertBool "should be generic form" $
                 "\"stablehlo.return\"" `T.isInfixOf` rendered
@@ -66,18 +66,28 @@ tests = testGroup "Pretty"
     , testGroup "Constants"
         [ testCase "scalar constant" $ do
             let op = Operation "stablehlo.constant" []
-                    [] [AttrDenseElements [] F32 [3.0]] [] (ValueId 0) (TensorType [] F32)
+                    [] [AttrDenseElements [] F32 [3.0]] [] [ValueId 0] [TensorType [] F32]
             let rendered = render op
             assertBool "dense scalar" $ "dense<3.0>" `T.isInfixOf` rendered
         , testCase "1D constant" $ do
             let op = Operation "stablehlo.constant" []
-                    [] [AttrDenseElements [3] F32 [1.0, 2.0, 3.0]] [] (ValueId 0) (TensorType [3] F32)
+                    [] [AttrDenseElements [3] F32 [1.0, 2.0, 3.0]] [] [ValueId 0] [TensorType [3] F32]
             let rendered = render op
             assertBool "dense 1D" $ "dense<[1.0, 2.0, 3.0]>" `T.isInfixOf` rendered
         , testCase "2D constant" $ do
             let op = Operation "stablehlo.constant" []
-                    [] [AttrDenseElements [2, 2] F32 [1.0, 2.0, 3.0, 4.0]] [] (ValueId 0) (TensorType [2, 2] F32)
+                    [] [AttrDenseElements [2, 2] F32 [1.0, 2.0, 3.0, 4.0]] [] [ValueId 0] [TensorType [2, 2] F32]
             let rendered = render op
             assertBool "dense 2D" $ "dense<[[1.0, 2.0], [3.0, 4.0]]>" `T.isInfixOf` rendered
+        ]
+    , testGroup "Multi-result ops"
+        [ testCase "two results" $ do
+            let op = Operation "stablehlo.rng_bit_generator" [ValueId 0]
+                    [TensorType [2] UI64]
+                    [AttrRaw "rng_algorithm = #stablehlo<rng_algorithm THREE_FRY>"]
+                    [] [ValueId 1, ValueId 2] [TensorType [2] UI64, TensorType [4] UI64]
+            let rendered = render op
+            assertBool "two result vids" $ "%1, %2 =" `T.isInfixOf` rendered
+            assertBool "rng_bit_generator" $ "stablehlo.rng_bit_generator" `T.isInfixOf` rendered
         ]
     ]

@@ -51,7 +51,10 @@ module HHLO.EDSL.Ops
     , gelu
     -- * Control flow
     , whileLoop
+    , whileLoopN
+    , whileLoop2
     , conditional
+    , conditional2
     , compare
     , lessThan
     -- * Data movement
@@ -73,6 +76,10 @@ module HHLO.EDSL.Ops
     , returnTuple2
     , Tuple(..)
     , returnT
+    -- * Random number generation
+    , rngUniform
+    , rngNormal
+    , rngBitGenerator
     ) where
 
 import Prelude hiding (subtract, negate, maximum, minimum, abs, compare, map, tanh)
@@ -582,7 +589,7 @@ compare (Tensor x) (Tensor y) direction = do
     let inType  = tensorType (Proxy @s) (Proxy @d)
         outType = tensorType (Proxy @'[]) (Proxy @'Bool)
     vid <- emitOp "stablehlo.compare" [x, y] [inType, inType]
-        [ AttrString "comparison_direction" direction
+        [ AttrRaw ("comparison_direction = #stablehlo<comparison_direction " <> direction <> ">")
         ] outType
     return (Tensor vid)
 
@@ -1160,3 +1167,215 @@ transposeConvolution lhsDilation padding input kernel = do
             , AttrInt "feature_group_count" 1
             ] outType
     return (Tensor vid)
+
+
+-- ---------------------------------------------------------------------------
+-- Multi-value control flow
+-- ---------------------------------------------------------------------------
+
+-- | While loop carrying two tensors of potentially different shapes/dtypes.
+--
+-- Example (count up to 10 while accumulating a sum):
+-- @
+--   result <- whileLoop2 (constant @'[] @'I64 0) (constant @'[] @'I64 0)
+--       (\c s -> lessThan c ten)
+--       (\c s -> do
+--           c' <- add c one
+--           s' <- add s c
+--           returnTuple2 c' s')
+-- @
+whileLoop2 :: forall s1 d1 s2 d2.
+              (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2)
+           => Tensor s1 d1 -> Tensor s2 d2
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Builder (Tensor '[] 'Bool))
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Builder (Tuple2 s1 d1 s2 d2))
+           -> Builder (Tuple2 s1 d1 s2 d2)
+whileLoop2 init1 init2 cond body = do
+    let initVids  = [tensorValue init1, tensorValue init2]
+        initTypes = [ tensorType (Proxy @s1) (Proxy @d1)
+                    , tensorType (Proxy @s2) (Proxy @d2)
+                    ]
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+
+    -- Build cond region
+    condBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1
+        v2 <- arg @s2 @d2
+        c  <- cond v1 v2
+        emitReturn [tensorValue c] [boolType]
+
+    -- Build body region
+    bodyBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1
+        v2 <- arg @s2 @d2
+        Tuple2 r1 r2 <- body v1 v2
+        emitReturn [tensorValue r1, tensorValue r2] initTypes
+
+    vids <- emitOpRegionsN "stablehlo.while" initVids initTypes []
+              [Region [condBlock], Region [bodyBlock]] initTypes
+    case vids of
+        [vid1, vid2] -> return (Tuple2 (Tensor vid1) (Tensor vid2))
+        _            -> error "whileLoop2: expected exactly two results"
+
+-- | While loop carrying N tensors of the same shape and dtype.
+--
+-- This is useful for batch loops or when all carried values are homogeneous.
+whileLoopN :: forall s d.
+              (KnownShape s, KnownDType d)
+           => [Tensor s d]                          -- ^ initial values
+           -> ([Tensor s d] -> Builder (Tensor '[] 'Bool))  -- ^ condition
+           -> ([Tensor s d] -> Builder [Tensor s d])        -- ^ body
+           -> Builder [Tensor s d]
+whileLoopN inits cond body = do
+    let ttype     = tensorType (Proxy @s) (Proxy @d)
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+        numVals   = length inits
+        initVids  = tensorValue <$> inits
+        initTypes = replicate numVals ttype
+
+    -- Build cond region
+    condBlock <- runBlockBuilder initTypes $ do
+        args <- mapM (\_ -> arg @s @d) [1..numVals]
+        c <- cond args
+        emitReturn [tensorValue c] [boolType]
+
+    -- Build body region
+    bodyBlock <- runBlockBuilder initTypes $ do
+        args <- mapM (\_ -> arg @s @d) [1..numVals]
+        results <- body args
+        emitReturn (tensorValue <$> results) initTypes
+
+    vids <- emitOpRegionsN "stablehlo.while" initVids initTypes []
+              [Region [condBlock], Region [bodyBlock]] initTypes
+    return (Tensor <$> vids)
+
+-- | If-then-else selecting between two pairs of tensor values.
+conditional2 :: forall s1 d1 s2 d2.
+                (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2)
+             => Tensor '[] 'Bool
+             -> Builder (Tuple2 s1 d1 s2 d2)   -- ^ true branch
+             -> Builder (Tuple2 s1 d1 s2 d2)   -- ^ false branch
+             -> Builder (Tuple2 s1 d1 s2 d2)
+conditional2 pred trueThunk falseThunk = do
+    let ttype1  = tensorType (Proxy @s1) (Proxy @d1)
+        ttype2  = tensorType (Proxy @s2) (Proxy @d2)
+        types   = [ttype1, ttype2]
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+
+    -- Build true region (no block args)
+    trueBlock <- runBlockBuilder [] $ do
+        Tuple2 r1 r2 <- trueThunk
+        emitReturn [tensorValue r1, tensorValue r2] types
+
+    -- Build false region (no block args)
+    falseBlock <- runBlockBuilder [] $ do
+        Tuple2 r1 r2 <- falseThunk
+        emitReturn [tensorValue r1, tensorValue r2] types
+
+    let (Tensor predVid) = pred
+    vids <- emitOpRegionsN "stablehlo.if" [predVid] [boolType] []
+              [Region [trueBlock], Region [falseBlock]] types
+    case vids of
+        [vid1, vid2] -> return (Tuple2 (Tensor vid1) (Tensor vid2))
+        _            -> error "conditional2: expected exactly two results"
+
+-- | If-then-else selecting between N tensor values of the same shape/dtype.
+--
+-- The caller must provide the expected number of results so the regions
+-- can be built with the correct return arity.
+conditionalN :: forall s d.
+                (KnownShape s, KnownDType d)
+             => Int                    -- ^ number of results (determines branch arity)
+             -> Tensor '[] 'Bool
+             -> Builder [Tensor s d]   -- ^ true branch
+             -> Builder [Tensor s d]   -- ^ false branch
+             -> Builder [Tensor s d]
+conditionalN n pred trueThunk falseThunk = do
+    let ttype     = tensorType (Proxy @s) (Proxy @d)
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+        types     = replicate n ttype
+
+    -- Build true region
+    trueBlock <- runBlockBuilder [] $ do
+        results <- trueThunk
+        emitReturn (tensorValue <$> take n results) types
+
+    -- Build false region
+    falseBlock <- runBlockBuilder [] $ do
+        results <- falseThunk
+        emitReturn (tensorValue <$> take n results) types
+
+    let (Tensor predVid) = pred
+    vids <- emitOpRegionsN "stablehlo.if" [predVid] [boolType] []
+              [Region [trueBlock], Region [falseBlock]] types
+    return (Tensor <$> vids)
+
+-- ---------------------------------------------------------------------------
+-- Random number generation
+-- ---------------------------------------------------------------------------
+
+-- | Generate a tensor of uniformly distributed random values in @[a, b)@.
+--
+-- The @shape@ operand is a constant 1-D @i64@ tensor built from the
+-- type-level shape.  The output dtype is @F32@.
+--
+-- Emits @stablehlo.rng@ with @distribution = UNIFORM@.
+rngUniform :: forall s. KnownShape s
+           => Tensor '[] 'F32   -- ^ lower bound @a@
+           -> Tensor '[] 'F32   -- ^ upper bound @b@
+           -> Builder (Tensor s 'F32)
+rngUniform a b = do
+    let outType = tensorType (Proxy @s) (Proxy @'F32)
+        shapeVals = fromIntegral <$> shapeVal (Proxy @s) :: [Int64]
+    -- Build a constant i64 tensor for the shape operand.
+    -- We emit it as a stablehlo.constant then use it as an operand.
+    shapeConst <- emitOp "stablehlo.constant" [] []
+        [AttrDenseElements [fromIntegral (length shapeVals)] I64 (fromIntegral <$> shapeVals)]
+        (TensorType [fromIntegral (length shapeVals)] I64)
+    vid <- emitOp "stablehlo.rng"
+            [tensorValue a, tensorValue b, shapeConst]
+            [ TensorType [] F32, TensorType [] F32, TensorType [fromIntegral (length shapeVals)] I64 ]
+            [AttrRaw "rng_distribution = #stablehlo<rng_distribution UNIFORM>"]
+            outType
+    return (Tensor vid)
+
+-- | Generate a tensor of standard normal random values (mean 0, std 1).
+--
+-- Emits @stablehlo.rng@ with @distribution = NORMAL@.
+rngNormal :: forall s. KnownShape s
+          => Builder (Tensor s 'F32)
+rngNormal = do
+    let outType = tensorType (Proxy @s) (Proxy @'F32)
+        shapeVals = fromIntegral <$> shapeVal (Proxy @s) :: [Int64]
+    a <- constant @'[] @'F32 0.0
+    b <- constant @'[] @'F32 1.0
+    shapeConst <- emitOp "stablehlo.constant" [] []
+        [AttrDenseElements [fromIntegral (length shapeVals)] I64 (fromIntegral <$> shapeVals)]
+        (TensorType [fromIntegral (length shapeVals)] I64)
+    vid <- emitOp "stablehlo.rng"
+            [tensorValue a, tensorValue b, shapeConst]
+            [ TensorType [] F32, TensorType [] F32, TensorType [fromIntegral (length shapeVals)] I64 ]
+            [AttrRaw "rng_distribution = #stablehlo<rng_distribution NORMAL>"]
+            outType
+    return (Tensor vid)
+
+-- | Deterministic random bit generator using the Threefry algorithm.
+--
+-- Takes a 2-element @UI64@ state tensor and returns @(new_state, output)@.
+-- The output is filled with random bits of type @UI64@.
+--
+-- Emits @stablehlo.rng_bit_generator@ with @algorithm = THREE_FRY@.
+rngBitGenerator :: forall s. (KnownShape s, KnownDType 'UI64)
+                => Tensor '[2] 'UI64   -- ^ initial state
+                -> Builder (Tensor '[2] 'UI64, Tensor s 'UI64)
+rngBitGenerator state = do
+    let stateType = tensorType (Proxy @'[2]) (Proxy @'UI64)
+        outType   = tensorType (Proxy @s) (Proxy @'UI64)
+    vids <- emitOpN "stablehlo.rng_bit_generator"
+              [tensorValue state]
+              [stateType]
+              [AttrRaw "rng_algorithm = #stablehlo<rng_algorithm THREE_FRY>"]
+              [stateType, outType]
+    case vids of
+        [vidState, vidOut] -> return (Tensor vidState, Tensor vidOut)
+        _                  -> error "rngBitGenerator: expected exactly two results"

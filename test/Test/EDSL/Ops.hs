@@ -441,4 +441,66 @@ tests = testGroup "EDSL.Ops"
             let rendered = render modu
             assertBool "i64 constant" $ "i64" `T.isInfixOf` rendered
         ]
+    , testGroup "Multi-value control flow"
+        [ testCase "whileLoop2" $ do
+            let modu = moduleFromBuilder2 @'[2] @'F32 @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32)
+                    , FuncArg "arg1" (TensorType [2] F32)
+                    ]
+                    $ do
+                        x <- arg @'[2] @'F32
+                        y <- arg @'[2] @'F32
+                        z <- whileLoop2 x y
+                            (\a b -> do
+                                s <- reduceSum a
+                                t <- constant @'[] @'F32 100.0
+                                lessThan s t)
+                            (\a b -> do
+                                a' <- add a a
+                                b' <- add b b
+                                returnTuple2 a' b')
+                        return z
+            let rendered = render modu
+            assertBool "stablehlo.while" $ "stablehlo.while" `T.isInfixOf` rendered
+        , testCase "conditional2" $ do
+            let modu = moduleFromBuilder2 @'[2] @'F32 @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32)
+                    , FuncArg "arg1" (TensorType [2] F32)
+                    , FuncArg "arg2" (TensorType [] Bool)
+                    ]
+                    $ do
+                        x <- arg @'[2] @'F32
+                        y <- arg @'[2] @'F32
+                        p <- arg @'[] @'Bool
+                        z <- conditional2 p (returnTuple2 x x) (returnTuple2 y y)
+                        return z
+            let rendered = render modu
+            assertBool "stablehlo.if" $ "stablehlo.if" `T.isInfixOf` rendered
+        ]
+    , testGroup "RNG"
+        [ testCase "rngUniform" $ do
+            let modu = moduleFromBuilder @'[2, 2] @'F32 "main" [] $ do
+                    a <- constant @'[] @'F32 0.0
+                    b <- constant @'[] @'F32 1.0
+                    r <- rngUniform a b
+                    return r
+            let rendered = render modu
+            assertBool "stablehlo.rng" $ "stablehlo.rng" `T.isInfixOf` rendered
+            assertBool "UNIFORM" $ "UNIFORM" `T.isInfixOf` rendered
+        , testCase "rngNormal" $ do
+            let modu = moduleFromBuilder @'[2, 2] @'F32 "main" [] $ do
+                    r <- rngNormal
+                    return r
+            let rendered = render modu
+            assertBool "stablehlo.rng" $ "stablehlo.rng" `T.isInfixOf` rendered
+            assertBool "NORMAL" $ "NORMAL" `T.isInfixOf` rendered
+        , testCase "rngBitGenerator" $ do
+            let modu = moduleFromBuilder2 @'[2] @'UI64 @'[4] @'UI64 "main" [] $ do
+                    s <- constant @'[2] @'UI64 1.0
+                    (s', r) <- rngBitGenerator s
+                    returnTuple2 s' r
+            let rendered = render modu
+            assertBool "stablehlo.rng_bit_generator" $ "stablehlo.rng_bit_generator" `T.isInfixOf` rendered
+            assertBool "THREE_FRY" $ "THREE_FRY" `T.isInfixOf` rendered
+        ]
     ]

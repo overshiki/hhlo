@@ -490,6 +490,7 @@ test-suite hhlo-test
         Test.Runtime.EndToEndNN
         Test.Runtime.EndToEndReductions
         Test.Runtime.EndToEndDataMovement
+        Test.Runtime.EndToEndMultiValue
         Test.Runtime.Buffer
         Test.Runtime.Async
         Test.Runtime.Errors
@@ -509,3 +510,55 @@ test-suite hhlo-test
     hs-source-dirs:   test
     default-language: GHC2021
     extra-libraries:  dl stdc++
+
+executable example-rng-uniform
+    import:           warnings
+    main-is:          30-rng-uniform.hs
+    build-depends:
+        base          >= 4.18.2 && < 5,
+        hhlo,
+        vector        >= 0.13  && < 0.14,
+        text          >= 2.0   && < 2.2
+    hs-source-dirs:   examples
+    default-language: GHC2021
+    if !flag(examples)
+        buildable: False
+
+executable example-rng-normal
+    import:           warnings
+    main-is:          31-rng-normal.hs
+    build-depends:
+        base          >= 4.18.2 && < 5,
+        hhlo,
+        vector        >= 0.13  && < 0.14,
+        text          >= 2.0   && < 2.2
+    hs-source-dirs:   examples
+    default-language: GHC2021
+    if !flag(examples)
+        buildable: False
+
+executable example-rng-bit-generator
+    import:           warnings
+    main-is:          32-rng-bit-generator.hs
+    build-depends:
+        base          >= 4.18.2 && < 5,
+        hhlo,
+        vector        >= 0.13  && < 0.14,
+        text          >= 2.0   && < 2.2
+    hs-source-dirs:   examples
+    default-language: GHC2021
+    if !flag(examples)
+        buildable: False
+
+executable example-multi-value-loop
+    import:           warnings
+    main-is:          33-multi-value-loop.hs
+    build-depends:
+        base          >= 4.18.2 && < 5,
+        hhlo,
+        vector        >= 0.13  && < 0.14,
+        text          >= 2.0   && < 2.2
+    hs-source-dirs:   examples
+    default-language: GHC2021
+    if !flag(examples)
+        buildable: False
