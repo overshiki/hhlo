@@ -55,6 +55,21 @@ deviceKind api dev                   -- "cpu" or "NVIDIA GeForce RTX 5090"
 defaultGPUDevice api client          -- first non-CPU device
 ```
 
+**Multi-GPU Inference Scaling**
+
+`HHLO.Runtime.Execute` provides `executeReplicas` for running the same compiled model concurrently across multiple GPUs:
+```haskell
+compileWithOptions api client mlirText
+    (defaultCompileOptions { optNumReplicas = numDevs })
+
+-- Launch independent forward passes on all GPUs
+executeReplicas api exec
+    [ (gpu0, [bufA0, bufB0])
+    , (gpu1, [bufA1, bufB1])
+    , ...
+    ]
+```
+
 ---
 
 ## Installation
@@ -111,9 +126,8 @@ This idempotent script auto-discovers the libraries and appends them to `~/.bash
 ```bash
 cabal run example-gpu-add
 cabal run example-gpu-matmul-bench
+cabal run example-multi-gpu-inference
 ```
-
-> **Note:** If `setup_gpu_env.sh` cannot find the libraries, install them first (see `doc/cuda-runtime-installation.md` for a manual installation guide from NVIDIA's website).
 
 ---
 
@@ -207,6 +221,7 @@ Standalone examples are provided in `examples/`:
 | 26 | `cabal run example-unet` | UNet segmentation toy (16×16) |
 | **27** | `cabal run example-gpu-add` | **GPU smoke test** |
 | **28** | `cabal run example-gpu-matmul-bench` | **GPU 4096×4096 benchmark** |
+| **29** | `cabal run example-multi-gpu-inference` | **Multi-GPU concurrent matmul** |
 
 ---
 
@@ -230,11 +245,12 @@ Runs **115 tests** across three tiers:
 HHLO_TEST_GPU=1 cabal test
 ```
 
-Runs the full 115 CPU tests **plus** 5 additional GPU integration tests:
+Runs the full 115 CPU tests **plus** 6 additional GPU integration tests:
 
 - `EndToEnd.GPU` — GPU availability and device enumeration
 - `Runtime.BufferGPU` — Buffer round-trip and metadata queries on GPU
 - `Runtime.AsyncGPU` — Async execution and `bufferReady` polling on GPU
+- `Runtime.MultiGPU` — Concurrent `executeReplicas` across all GPUs
 
 Sample output:
 ```
@@ -256,8 +272,10 @@ HHLO Tests
     gpu buffer round-trip f32:        OK
   Runtime.AsyncGPU
     gpu executeAsync + await:         OK
+  Runtime.MultiGPU
+    execute replicas on all GPUs:     OK
 
-All 120 tests passed (16.27s)
+All 121 tests passed (16.27s)
 ```
 
 ---
@@ -275,7 +293,7 @@ All 120 tests passed (16.27s)
 │   └── pjrt/               # Downloaded PJRT plugins (.so files)
 │       └── lib_symlinks/   # Compatibility symlinks for missing library versions
 ├── doc/                    # Architecture and design documents
-├── examples/               # Standalone example programs (01–28)
+├── examples/               # Standalone example programs (01–29)
 ├── src/HHLO/
 │   ├── Core/Types.hs       # DType, Shape, HostType type families
 │   ├── IR/
@@ -291,7 +309,8 @@ All 120 tests passed (16.27s)
 │       │   └── Plugin.hs   # Backend-agnostic plugin loading (withPJRT)
 │       ├── Device.hs       # Device enumeration & selection
 │       ├── Compile.hs      # MLIR → PJRT executable
-│       ├── Execute.hs      # Synchronous + device-targeted execution
+│       ├── Compile.hs      # MLIR → PJRT executable (with `CompileOptions`)
+│       ├── Execute.hs      # Synchronous + device-targeted + multi-GPU replica execution
 │       ├── Async.hs        # Non-blocking execution with PJRT_Event
 │       └── Buffer.hs       # Host↔device buffer transfers + metadata queries
 ├── test/
@@ -310,6 +329,7 @@ All 120 tests passed (16.27s)
 │   │   │   ├── BufferGPU.hs       # GPU buffer integration tests
 │   │   │   ├── Async.hs
 │   │   │   ├── AsyncGPU.hs        # GPU async tests
+│   │   │   ├── MultiGPU.hs        # Multi-GPU inference scaling tests
 │   │   │   └── Errors.hs
 │   │   └── Utils.hs
 │   └── Main.hs
@@ -330,6 +350,7 @@ The `doc/` directory contains detailed design documents:
 | `implementation-design.md` | Four-layer architecture and design decisions |
 | `progress-and-remaining-work.md` | Current status, completed features, and backlog |
 | `test-suite-documentation.md` | Test catalog and tier descriptions |
+| `cuda-runtime-installation.md` | Manual installation guide for cuDNN/NCCL/NVSHMEM |
 
 ---
 

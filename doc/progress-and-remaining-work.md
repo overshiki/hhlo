@@ -1,7 +1,7 @@
 # HHLO Project Status: Progress and Remaining Work
 
 **Date:** 2026-04-22
-**Status:** GPU support implemented. 28 examples, 115/115 CPU tests pass, 120/120 tests pass with GPU enabled. Single-GPU execution fully operational on NVIDIA CUDA via PJRT.
+**Status:** Multi-GPU inference scaling implemented. 29 examples, 115/115 CPU tests pass, 121/121 tests pass with GPU enabled. Single-GPU and multi-GPU execution fully operational on NVIDIA CUDA via PJRT.
 
 ---
 
@@ -12,9 +12,9 @@
 - Full design docs written: `design.md`, `implementation-design.md`, `understanding-pjrt.md`, `understanding-zml-pjrt-artifacts.md`, `text-emission-vs-mlir-hs.md`, `control-flow-ops-design.md`, `complex-model-examples-design.md`, `pjrt-cpu-v1160-parser-limitations.md`, `test-suite-documentation.md`, `cuda-runtime-installation.md`.
 
 ### 2. Build System
-- `cabal build all` completes successfully (library + demo + 28 examples + test suite).
+- `cabal build all` completes successfully (library + demo + 29 examples + test suite).
 - `cabal test` passes 115/115 tests on CPU.
-- `HHLO_TEST_GPU=1 cabal test` passes 120/120 tests (115 CPU + 5 GPU integration).
+- `HHLO_TEST_GPU=1 cabal test` passes 121/121 tests (115 CPU + 6 GPU integration).
 - PJRT CPU plugin (`deps/pjrt/libpjrt_cpu.so`) downloads and loads correctly via `pjrt_script.sh`.
 - PJRT CUDA plugin (`deps/pjrt/libpjrt_cuda.so`) downloads automatically when `nvidia-smi` is present.
 - `setup_gpu_env.sh` auto-discovers NVIDIA runtime libraries and configures `LD_LIBRARY_PATH` idempotently.
@@ -33,8 +33,8 @@
 | `Runtime.PJRT.Error` | ✅ | `checkError`, `withErrorMessage`, `PJRTException` |
 | `Runtime.PJRT.Plugin` | ✅ | **New.** Backend-agnostic `withPJRT`; convenience wrappers `withPJRTCPU`, `withPJRTGPU` |
 | `Runtime.Device` | ✅ | **New.** `addressableDevices`, `deviceId`, `deviceKind`, `defaultGPUDevice` |
-| `Runtime.Compile` | ✅ | `compile` with `ForeignPtr` finalizer |
-| `Runtime.Execute` | ✅ | `execute` with dynamic output count + **`executeOn`** for explicit device targeting |
+| `Runtime.Compile` | ✅ | `compile` with `ForeignPtr` finalizer + **`compileWithOptions`** with configurable `num_replicas` |
+| `Runtime.Execute` | ✅ | `execute` with dynamic output count + **`executeOn`** for explicit device targeting + **`executeReplicas`** for concurrent multi-GPU inference |
 | `Runtime.Async` | ✅ | `executeAsync`, `bufferReady`, `awaitBuffers` |
 | `Runtime.Buffer` | ✅ | `toDevice`/`fromDevice` + `toDeviceOn` (explicit device) + `fromDeviceAsync` (non-blocking D2H) + `bufferDimensions`, `bufferElementType`, `bufferOnDeviceSize` |
 
@@ -47,6 +47,8 @@
 - ✅ **Device-aware buffer creation:** `hhlo_pjrt_buffer_from_host_on_device`
 - ✅ **Async D2H:** `hhlo_pjrt_buffer_to_host_async`
 - ✅ **Device-aware execution:** `hhlo_pjrt_execute_on_device`
+- ✅ **Multi-device execution:** `hhlo_pjrt_execute_multi` (PJRT-native SPMD execute)
+- ✅ **Dynamic compile options:** `hhlo_pjrt_compile_with_options` with configurable `num_replicas`
 - ✅ **Formal C header:** `pjrt_shim.h` for clean FFI declarations
 
 ### 5. Demo & Examples
@@ -81,13 +83,15 @@
 | 26 | `examples/26-unet.hs` | UNet segmentation (toy 16×16) | ✅ |
 | **27** | `examples/27-gpu-add.hs` | **GPU smoke test: `add` on CUDA** | ✅ |
 | **28** | `examples/28-gpu-matmul-bench.hs` | **GPU benchmark: 4096×4096 matmul** | ✅ |
+| **29** | `examples/29-multi-gpu-inference.hs` | **Multi-GPU concurrent 4096×4096 matmul** | ✅ |
 
 ### 6. Test Suite (`test/`)
 - ✅ **115 CPU tests** across 13 modules, all passing.
-- ✅ **5 GPU integration tests** (run with `HHLO_TEST_GPU=1`):
+- ✅ **6 GPU integration tests** (run with `HHLO_TEST_GPU=1`):
   - `Test.Runtime.EndToEndGPU` — GPU availability & device enumeration
   - `Test.Runtime.BufferGPU` — Buffer round-trip and metadata on GPU
   - `Test.Runtime.AsyncGPU` — `executeAsync` + `awaitBuffers`, `bufferReady` polling on GPU
+  - `Test.Runtime.MultiGPU` — Concurrent `executeReplicas` across all GPUs
 - Tier 1 (Golden): `Test.IR.Pretty`, `Test.IR.PrettyOps`, `Test.IR.PrettyNN`, `Test.IR.PrettyControlFlow`, `Test.IR.Builder`, `Test.EDSL.Ops`
 - Tier 2 (E2E Numerical): `Test.Runtime.EndToEndArithmetic`, `Test.Runtime.EndToEndMatmul`, `Test.Runtime.EndToEndDataMovement`, `Test.Runtime.EndToEndNN`, `Test.Runtime.EndToEndReductions`, `Test.Runtime.EndToEndShape`
 - Tier 3 (Integration): `Test.Runtime.Buffer`, `Test.Runtime.Async`, `Test.Runtime.Errors`
@@ -191,13 +195,13 @@ The specific `libpjrt_cpu.so` build from `zml/pjrt-artifacts` (StableHLO v1.16.0
 
 ## Immediate Next Steps (awaiting your decision)
 
-The codebase is at a **solid single-GPU prototype** stage with:
+The codebase is at a **solid multi-GPU inference** stage with:
 - A type-safe NN-layer EDSL (50+ ops)
 - Full control flow support
 - Four validated complex model examples (ResNet, AlexNet, Transformer, UNet)
-- 28 working examples (26 CPU + 2 GPU)
-- 115/115 CPU tests passing, 120/120 with GPU enabled
-- Verified on 8× NVIDIA GeForce RTX 5090
+- 29 working examples (26 CPU + 3 GPU)
+- 115/115 CPU tests passing, 121/121 with GPU enabled
+- Single-GPU and multi-GPU inference verified on 8× NVIDIA GeForce RTX 5090
 
 The most impactful next decisions are:
 
