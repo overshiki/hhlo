@@ -341,7 +341,19 @@ test-suite hhlo-test
     main-is:          Main.hs
     other-modules:
         Test.IR.Pretty
+        Test.IR.Builder
+        Test.EDSL.Ops
         Test.Runtime.EndToEnd
+        Test.Runtime.EndToEndArithmetic
+        Test.Runtime.EndToEndShape
+        Test.Runtime.EndToEndMatmul
+        Test.Runtime.EndToEndNN
+        Test.Runtime.EndToEndReductions
+        Test.Runtime.EndToEndDataMovement
+        Test.Runtime.Buffer
+        Test.Runtime.Async
+        Test.Runtime.Errors
+        Test.Utils
     build-depends:
         base,
         hhlo,

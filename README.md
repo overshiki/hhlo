@@ -164,22 +164,28 @@ cabal run example-tuple
 cabal test
 ```
 
-The test suite includes:
+The test suite (`hhlo-test`) contains **115 tests** across three tiers:
 
-- **Pretty printer tests** — Verify MLIR text generation for types, functions, and modules.
-- **End-to-end runtime test** — Load the CPU plugin, compile a StableHLO `add` program, execute it, and verify the numerical result.
+- **Tier 1 — Golden tests** — Verify rendered MLIR text for EDSL ops, IR constructs, NN layers, and control flow.
+- **Tier 2 — End-to-end runtime tests** — Load the PJRT CPU plugin, compile StableHLO programs, execute them, and verify numerical results. Covers arithmetic, matmul, reductions, data movement (slice, pad, gather, scatter, conditional), and NN ops (conv2d, softmax, batch norm, layer norm, gelu, global average pooling).
+- **Tier 3 — Runtime integration tests** — Buffer metadata queries, async execution, and error handling.
 
 Sample output:
 ```
 HHLO Tests
-  Pretty
-    scalar type:            OK
-    2D tensor type:         OK
-    simple function:        OK
-  EndToEnd
-    add two tensors on CPU: OK (0.03s)
+  EDSL.Ops
+    Binary element-wise
+      add:                            OK
+      ...
+  EndToEnd.Arithmetic
+    relu:                             OK (0.02s)
+    ...
+  Runtime.Buffer
+    buffer round-trip f32:            OK
+  Runtime.Async
+    buffer ready after sync execute:  OK (0.02s)
 
-All 4 tests passed (0.03s)
+All 115 tests passed (0.77s)
 ```
 
 ---
@@ -220,8 +226,26 @@ All 4 tests passed (0.03s)
 │       ├── Async.hs        # Non-blocking execution with PJRT_Event
 │       └── Buffer.hs       # Host↔device buffer transfers + metadata queries
 ├── test/
-│   ├── Test/IR/Pretty.hs
-│   └── Test/Runtime/EndToEnd.hs
+│   ├── Test/
+│   │   ├── EDSL/Ops.hs
+│   │   ├── IR/
+│   │   │   ├── Builder.hs
+│   │   │   ├── Pretty.hs
+│   │   │   ├── PrettyOps.hs
+│   │   │   ├── PrettyNN.hs
+│   │   │   └── PrettyControlFlow.hs
+│   │   ├── Runtime/
+│   │   │   ├── EndToEndArithmetic.hs
+│   │   │   ├── EndToEndMatmul.hs
+│   │   │   ├── EndToEndDataMovement.hs
+│   │   │   ├── EndToEndNN.hs
+│   │   │   ├── EndToEndReductions.hs
+│   │   │   ├── EndToEndShape.hs
+│   │   │   ├── Buffer.hs
+│   │   │   ├── Async.hs
+│   │   │   └── Errors.hs
+│   │   └── Utils.hs
+│   └── Main.hs
 ├── hhlo.cabal
 ├── pjrt_script.sh
 └── README.md

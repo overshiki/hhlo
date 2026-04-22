@@ -1,0 +1,41 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module Test.Runtime.EndToEndArithmetic where
+
+import Prelude hiding (negate, maximum, minimum)
+import qualified Data.Vector.Storable as V
+import Test.Tasty
+import Test.Tasty.HUnit
+
+import HHLO.EDSL.Ops
+import Test.Utils
+
+inputA :: V.Vector Float
+inputA = V.fromList [1.0, 2.0, 3.0, 4.0]
+
+inputB :: V.Vector Float
+inputB = V.fromList [5.0, 6.0, 7.0, 8.0]
+
+tests :: TestTree
+tests = testGroup "EndToEnd.Arithmetic"
+    [ testGroup "Binary element-wise"
+        [ e2eTestF32_2arg "add" inputA inputB add (V.fromList [6.0, 8.0, 10.0, 12.0])
+        , e2eTestF32_2arg "sub" inputB inputA sub (V.fromList [4.0, 4.0, 4.0, 4.0])
+        , e2eTestF32_2arg "multiply" inputA inputB multiply (V.fromList [5.0, 12.0, 21.0, 32.0])
+        , e2eTestF32_2arg "divide" inputB inputA divide (V.fromList [5.0, 3.0, 7.0/3.0, 2.0])
+        , e2eTestF32_2arg "maximum" (V.fromList [-1, 2, -3, 4]) (V.fromList [0, 0, 0, 0]) maximum (V.fromList [0, 2, 0, 4])
+        , e2eTestF32_2arg "minimum" (V.fromList [-1, 2, -3, 4]) (V.fromList [0, 0, 0, 0]) minimum (V.fromList [-1, 0, -3, 0])
+        ]
+    , testGroup "Unary element-wise"
+        [ e2eTestF32_1arg "relu positive" inputA relu inputA
+        , e2eTestF32_1arg "relu negative" (V.fromList [-1, -2, 3, -4]) relu (V.fromList [0, 0, 3, 0])
+        , e2eTestF32_1arg "negate" inputA (\x -> negate x) (V.fromList [-1, -2, -3, -4])
+        , e2eTestF32_1arg "abs" (V.fromList [-1, -2, 3, -4]) abs' (V.fromList [1, 2, 3, 4])
+        ]
+    , testGroup "Chain ops"
+        [ e2eTestF32_2arg "(a+b)*(a-b)" inputA inputB
+            (\a b -> do s <- add a b; d <- sub a b; multiply s d)
+            (V.fromList [-24.0, -32.0, -40.0, -48.0])
+        ]
+    ]

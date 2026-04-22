@@ -12,7 +12,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import Data.Text.Lazy.Builder (Builder, fromText, toLazyText)
 import HHLO.IR.AST
-import HHLO.Core.Types (dtypeToText)
+import HHLO.Core.Types (DType(..), dtypeToText)
 
 class Pretty a where
     pretty :: a -> Builder
@@ -59,15 +59,32 @@ instance Pretty FuncArg where
         fromText "%" <> fromText name <> ": " <> pretty t
 
 instance Pretty Operation where
-    pretty (Operation "stablehlo.reduce" operands operandTypes attrs regions result resultType) =
-        -- Special format for reduce with 'applies' shorthand:
-        --   %n = stablehlo.reduce(%input init: %init) applies stablehlo.add
-        --        across dimensions = [0] : (input_type, init_type) -> result_type
-        valueRefBuilder result <> " = stablehlo.reduce("
-        <> valueRefBuilder (operands !! 0) <> " init: " <> valueRefBuilder (operands !! 1) <> ")"
-        <> prettyReduceAttrs attrs
-        <> " : " <> prettyResultType operandTypes resultType
-        <> mconcat (map prettyRegion regions)
+    pretty (Operation "stablehlo.reduce" operands operandTypes attrs regions result resultType)
+        | null regions =
+            -- Special format for reduce with 'applies' shorthand (no region):
+            --   %n = stablehlo.reduce(%input init: %init) applies stablehlo.add
+            --        across dimensions = [0] : (input_type, init_type) -> result_type
+            valueRefBuilder result <> " = stablehlo.reduce("
+            <> valueRefBuilder (operands !! 0) <> " init: " <> valueRefBuilder (operands !! 1) <> ")"
+            <> prettyReduceAttrs attrs
+            <> " : " <> prettyResultType operandTypes resultType
+        | otherwise =
+            -- Generic form when a region is present:
+            --   %n = "stablehlo.reduce"(%input, %init) ({
+            --     ^bb0(%argN: type, %argM: type):
+            --       %p = stablehlo.add %argN, %argM : (type, type) -> type
+            --       "stablehlo.return"(%p) : (type) -> ()
+            --   }) {dimensions = array<i64: ...>} : (types) -> type
+            valueRefBuilder result <> " = \"stablehlo.reduce\"("
+            <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+            <> " ("
+            <> mconcat (map prettyRegion regions)
+            <> ") "
+            <> prettyAttrs (filter (not . isAppliesAttr) attrs)
+            <> " : " <> prettyResultType operandTypes resultType
+      where
+        isAppliesAttr (AttrString "applies" _) = True
+        isAppliesAttr _ = False
     pretty (Operation "stablehlo.convolution" operands operandTypes attrs regions result resultType) =
         -- Custom format for convolution:
         --   %r = stablehlo.convolution(%lhs, %rhs)
@@ -203,18 +220,23 @@ instance Pretty Operation where
 -- For all other cases we use the standard MLIR attribute-dictionary syntax.
 prettyAttrsForOp :: Text -> [Attribute] -> Builder
 prettyAttrsForOp _ [] = mempty
-prettyAttrsForOp _ [AttrDenseElements shp _dt vals] =
-    " dense<" <> denseElements shp vals <> ">"
+prettyAttrsForOp _ [AttrDenseElements shp dt vals] =
+    " dense<" <> denseElements shp dt vals <> ">"
 prettyAttrsForOp "stablehlo.broadcast_in_dim" [AttrIntList _name vals] =
     ", dims = [" <> fromText (T.intercalate ", " (map (T.pack . show) vals)) <> "]"
 prettyAttrsForOp _ attrs = " " <> prettyAttrs attrs
 
--- | Pretty-print attributes for 'stablehlo.reduce' using the 'applies' shorthand.
+-- | Pretty-print attributes for 'stablehlo.reduce'.
+-- If an 'applies' attribute is present we use the shorthand form;
+-- otherwise we only emit the dimensions (the region carries the op).
 prettyReduceAttrs :: [Attribute] -> Builder
 prettyReduceAttrs attrs =
     let dims = lookupAttrIntList "dimensions" attrs
         op   = lookupAttrString "applies" attrs
-    in " applies " <> fromText op <> " across dimensions = [" <> fromText (T.intercalate ", " (map (T.pack . show) dims)) <> "]"
+        dimsText = " across dimensions = [" <> fromText (T.intercalate ", " (map (T.pack . show) dims)) <> "]"
+    in if T.null op
+       then dimsText
+       else " applies " <> fromText op <> dimsText
 
 lookupAttrIntList :: Text -> [Attribute] -> [Int64]
 lookupAttrIntList name = foldr f []
@@ -268,15 +290,27 @@ prettyBNAttrs attrs = " <{" <> mconcat (intersperse (", ") (map prettyAttr attrs
 
 -- | Build the nested list syntax for a 'dense<...>' attribute.
 -- Scalar: @0.0@, 1-D: @[1, 2]@, 2-D: @[[1, 2], [3, 4]]@, etc.
-denseElements :: [Integer] -> [Double] -> Builder
-denseElements []     [v] = fromText (T.pack (show v))
-denseElements []     _   = error "denseElements: scalar mismatch"
-denseElements [n]    xs  =
-    "[" <> fromText (T.intercalate ", " (map (T.pack . show) (take (fromIntegral n) xs))) <> "]"
-denseElements (n:ns) xs  =
+denseElements :: [Integer] -> DType -> [Double] -> Builder
+denseElements []     dt [v] = fromText (T.pack (formatDenseVal dt v))
+denseElements []     _  _   = error "denseElements: scalar mismatch"
+denseElements [n]    dt xs  =
+    "[" <> fromText (T.intercalate ", " (map (T.pack . formatDenseVal dt) (take (fromIntegral n) xs))) <> "]"
+denseElements (n:ns) dt xs  =
     let chunkSize = product ns
         chunks    = chunksOf (fromIntegral chunkSize) (take (fromIntegral (n * chunkSize)) xs)
-    in "[" <> mconcat (intersperse (", ") (map (denseElements ns) chunks)) <> "]"
+    in "[" <> mconcat (intersperse (", ") (map (denseElements ns dt) chunks)) <> "]"
+
+formatDenseVal :: DType -> Double -> String
+formatDenseVal I64 v = show (round v :: Integer)
+formatDenseVal I32 v = show (round v :: Integer)
+formatDenseVal I16 v = show (round v :: Integer)
+formatDenseVal I8  v = show (round v :: Integer)
+formatDenseVal UI64 v = show (round v :: Integer)
+formatDenseVal UI32 v = show (round v :: Integer)
+formatDenseVal UI16 v = show (round v :: Integer)
+formatDenseVal UI8  v = show (round v :: Integer)
+formatDenseVal Bool v = if v /= 0.0 then "true" else "false"
+formatDenseVal _    v = show v
 
 chunksOf :: Int -> [a] -> [[a]]
 chunksOf _ [] = []
@@ -317,7 +351,7 @@ prettyAttr (AttrString name s) =
 prettyAttr (AttrIntList name vals) =
     fromText name <> " = [" <> fromText (T.intercalate ", " (map (T.pack . show) vals)) <> "]"
 prettyAttr (AttrDenseElements shape dtype vals) =
-    "value = dense<" <> denseElements shape vals <> "> : " <> pretty (TensorType shape dtype)
+    "value = dense<" <> denseElements shape dtype vals <> "> : " <> pretty (TensorType shape dtype)
 prettyAttr (AttrDict pairs) =
     mconcat (intersperse (", ") (map prettyDictPair pairs))
   where

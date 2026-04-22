@@ -305,13 +305,8 @@ type family ReduceAllShape (s :: Shape) :: Shape where
 -- Result is a scalar.
 reduceSum :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor '[] d)
 reduceSum (Tensor x) = do
-    let inType = tensorType (Proxy @s) (Proxy @d)
-        outType = tensorType (Proxy @'[]) (Proxy @d)
-    zeroVid <- emitOp "stablehlo.constant" [] []
-        [AttrDenseElements [] (dtypeVal (Proxy @d)) [0.0]] outType
     let dims = [0 .. fromIntegral (length (shapeVal (Proxy @s))) - 1]
-    vid <- emitReduce x inType zeroVid outType dims "stablehlo.add" outType
-    return (Tensor vid)
+    reduceSumDim @s @'[] dims (Tensor x)
 
 -- | Sum elements over specific dimensions.
 --
@@ -324,15 +319,26 @@ reduceSumDim :: forall sFrom sTo d.
                 (KnownShape sFrom, KnownShape sTo, KnownDType d)
              => [Int] -> Tensor sFrom d -> Builder (Tensor sTo d)
 reduceSumDim dims (Tensor x) = do
-    let inType  = tensorType (Proxy @sFrom) (Proxy @d)
-        outType = tensorType (Proxy @sTo)   (Proxy @d)
-        scalarType = tensorType (Proxy @'[]) (Proxy @d)
-    -- The init value for stablehlo.reduce must be a scalar, even when the
-    -- result is non-scalar.  The scalar is used as the initial value for
-    -- each independent reduction.
+    let inType   = tensorType (Proxy @sFrom) (Proxy @d)
+        outType  = tensorType (Proxy @sTo)   (Proxy @d)
+        elemType = tensorType (Proxy @'[])   (Proxy @d)
+    -- Init value for stablehlo.reduce (must be scalar)
     zeroVid <- emitOp "stablehlo.constant" [] []
-        [AttrDenseElements [] (dtypeVal (Proxy @d)) [0.0]] scalarType
-    vid <- emitReduce x inType zeroVid scalarType dims "stablehlo.add" outType
+        [AttrDenseElements [] (dtypeVal (Proxy @d)) [0.0]] elemType
+    -- Build reduction region: two scalar args, apply stablehlo.add
+    redBlock <- runBlockBuilder [elemType, elemType] $ do
+        a <- arg @'[] @d
+        b <- arg @'[] @d
+        sumVid <- emitOp "stablehlo.add"
+                    [tensorValue a, tensorValue b]
+                    [elemType, elemType] [] elemType
+        emitReturn [sumVid] [elemType]
+    vid <- emitOpRegions "stablehlo.reduce"
+            [x, zeroVid]
+            [inType, elemType]
+            [AttrRaw $ "dimensions = array<i64: " <> T.intercalate ", " [T.pack (show d) | d <- dims] <> ">"]
+            [Region [redBlock]]
+            outType
     return (Tensor vid)
 
 -- ---------------------------------------------------------------------------
@@ -983,7 +989,9 @@ globalAvgPool :: forall n h w c.
               => Tensor '[n, h, w, c] 'F32
               -> Builder (Tensor '[n, c] 'F32)
 globalAvgPool x = do
-    summed <- reduceSumDim @'[n, h, w, c] @'[n, c] [1, 2] x
+    -- Work around PJRT CPU partial multi-dim reduce bug by doing two single-dim reductions.
+    step1 <- reduceSumDim @'[n, h, w, c] @'[n, w, c] [1] x
+    summed <- reduceSumDim @'[n, w, c] @'[n, c] [1] step1
     let hw = fromIntegral (natVal (Proxy @h) * natVal (Proxy @w)) :: Double
     hwVal <- constant @'[] @'F32 hw
     hwBC  <- broadcastWithDims @'[] @'[n, c] [] hwVal
