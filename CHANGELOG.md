@@ -10,7 +10,7 @@
 * 115 CPU tests + 6 GPU integration tests.
 * 29 executable examples including ResNet-18, AlexNet, Transformer, and UNet.
 
-## 0.1.1.0 -- 2026-04-22
+## 0.2.0.0 -- 2026-04-22
 
 * Multi-result `Operation` AST — `Operation` now supports `opResults :: [ValueId]`
   and `opResultTypes :: [TensorType]`, enabling ops with multiple outputs such as
