@@ -4,7 +4,7 @@
 
 module Test.EDSL.Ops where
 
-import Prelude hiding (map, maximum, minimum, negate, compare, tanh)
+import Prelude hiding (map, maximum, minimum, negate, compare, tanh, sqrt, sin, cos, tan, floor)
 import qualified Data.Text as T
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -317,7 +317,7 @@ tests = testGroup "EDSL.Ops"
             let rendered = render modu
             assertBool "stablehlo.if" $ "stablehlo.if" `T.isInfixOf` rendered
         , testCase "compare" $ do
-            let modu = moduleFromBuilder @'[] @'Bool "main"
+            let modu = moduleFromBuilder @'[2] @'Bool "main"
                     [ FuncArg "arg0" (TensorType [2] F32)
                     , FuncArg "arg1" (TensorType [2] F32)
                     ]
@@ -502,5 +502,74 @@ tests = testGroup "EDSL.Ops"
             let rendered = render modu
             assertBool "stablehlo.rng_bit_generator" $ "stablehlo.rng_bit_generator" `T.isInfixOf` rendered
             assertBool "THREE_FRY" $ "THREE_FRY" `T.isInfixOf` rendered
+        ]
+    , testGroup "New primitive ops (HBayesian gaps)"
+        [ testCase "sqrt" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- sqrt x; return y
+            assertBool "stablehlo.sqrt" $ "stablehlo.sqrt" `T.isInfixOf` render modu
+        , testCase "rsqrt" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- rsqrt x; return y
+            assertBool "stablehlo.rsqrt" $ "stablehlo.rsqrt" `T.isInfixOf` render modu
+        , testCase "sin" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- sin x; return y
+            assertBool "stablehlo.sine" $ "stablehlo.sine" `T.isInfixOf` render modu
+        , testCase "cos" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- cos x; return y
+            assertBool "stablehlo.cosine" $ "stablehlo.cosine" `T.isInfixOf` render modu
+        , testCase "tan" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- tan x; return y
+            assertBool "stablehlo.tangent" $ "stablehlo.tangent" `T.isInfixOf` render modu
+        , testCase "pow" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- pow x x; return y
+            assertBool "stablehlo.power" $ "stablehlo.power" `T.isInfixOf` render modu
+        , testCase "log1p" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- log1p x; return y
+            assertBool "stablehlo.log_plus_one" $ "stablehlo.log_plus_one" `T.isInfixOf` render modu
+        , testCase "floor" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- floor x; return y
+            assertBool "stablehlo.floor" $ "stablehlo.floor" `T.isInfixOf` render modu
+        , testCase "ceil" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- ceil x; return y
+            assertBool "stablehlo.ceil" $ "stablehlo.ceil" `T.isInfixOf` render modu
+        , testCase "equal shape-preserving" $ do
+            let modu = moduleFromBuilder @'[2] @'Bool "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- equal x x; return y
+            assertBool "stablehlo.compare EQ" $ "stablehlo.compare" `T.isInfixOf` render modu
+        , testCase "sigmoid" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32) ]
+                    $ do x <- arg @'[2] @'F32; y <- sigmoid x; return y
+            assertBool "stablehlo.exponential" $ "stablehlo.exponential" `T.isInfixOf` render modu
+        , testCase "pack2" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main" [] $ do
+                    a <- constant @'[] @'F32 1.0
+                    b <- constant @'[] @'F32 2.0
+                    c <- pack2 a b
+                    return c
+            assertBool "stablehlo.concatenate" $ "stablehlo.concatenate" `T.isInfixOf` render modu
+        , testCase "slice1" $ do
+            let modu = moduleFromBuilder @'[] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [3] F32) ]
+                    $ do x <- arg @'[3] @'F32; y <- slice1 x 1; return y
+            assertBool "stablehlo.slice" $ "stablehlo.slice" `T.isInfixOf` render modu
         ]
     ]

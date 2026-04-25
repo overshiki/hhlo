@@ -3,7 +3,7 @@
 
 module Test.Runtime.EndToEndArithmetic where
 
-import Prelude hiding (negate, maximum, minimum)
+import Prelude hiding (negate, maximum, minimum, sqrt, sin, cos, tan, floor)
 import qualified Data.Vector.Storable as V
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -26,12 +26,16 @@ tests = testGroup "EndToEnd.Arithmetic"
         , e2eTestF32_2arg "divide" inputB inputA divide (V.fromList [5.0, 3.0, 7.0/3.0, 2.0])
         , e2eTestF32_2arg "maximum" (V.fromList [-1, 2, -3, 4]) (V.fromList [0, 0, 0, 0]) maximum (V.fromList [0, 2, 0, 4])
         , e2eTestF32_2arg "minimum" (V.fromList [-1, 2, -3, 4]) (V.fromList [0, 0, 0, 0]) minimum (V.fromList [-1, 0, -3, 0])
+        , e2eTestF32_2arg "pow" (V.fromList [1, 2, 3, 4]) (V.fromList [2, 2, 2, 2]) pow (V.fromList [1, 4, 9, 16])
         ]
     , testGroup "Unary element-wise"
         [ e2eTestF32_1arg "relu positive" inputA relu inputA
         , e2eTestF32_1arg "relu negative" (V.fromList [-1, -2, 3, -4]) relu (V.fromList [0, 0, 3, 0])
         , e2eTestF32_1arg "negate" inputA (\x -> negate x) (V.fromList [-1, -2, -3, -4])
         , e2eTestF32_1arg "abs" (V.fromList [-1, -2, 3, -4]) abs' (V.fromList [1, 2, 3, 4])
+        , e2eTestF32_1arg "sqrt" (V.fromList [1, 4, 9, 16]) sqrt (V.fromList [1, 2, 3, 4])
+        , e2eTestF32_1arg "floor" (V.fromList [1.1, 2.9, 3.0, -1.5]) floor (V.fromList [1, 2, 3, -2])
+        , e2eTestF32_1arg "ceil" (V.fromList [1.1, 2.9, 3.0, -1.5]) ceil (V.fromList [2, 3, 3, -1])
         ]
     , testGroup "Chain ops"
         [ e2eTestF32_2arg "(a+b)*(a-b)" inputA inputB

@@ -29,4 +29,8 @@
 * New examples: `30-rng-uniform`, `31-rng-normal`, `32-rng-bit-generator`,
   `33-multi-value-loop`.
 * Updated example `12-while` from print-only to fully executable.
-* Test count: 124 CPU tests + 6 GPU integration tests.
+* New primitive ops: `sqrt`, `rsqrt`, `sin`, `cos`, `tan`, `pow`, `log1p`, `floor`, `ceil`.
+* New composite / convenience ops: `sigmoid`, `sumAll`, `pack2`, `pack3`, `slice1`.
+* Fixed `compare` to return shape-preserving `Tensor s 'Bool` per StableHLO spec.
+* New comparison wrappers: `equal`, `notEqual`, `greaterThan`, `lessThanOrEqual`, `greaterThanOrEqual`.
+* Test count: 141 CPU tests + 6 GPU integration tests.

@@ -21,9 +21,18 @@ module HHLO.EDSL.Ops
     , logarithm
     , tanh
     , erf
+    , sqrt
+    , rsqrt
+    , sin
+    , cos
+    , tan
+    , log1p
+    , floor
+    , ceil
     -- * Binary element-wise ops
     , maximum
     , minimum
+    , pow
     -- * Shape manipulation
     , reshape
     , broadcastWithDims
@@ -57,6 +66,11 @@ module HHLO.EDSL.Ops
     , conditional2
     , compare
     , lessThan
+    , greaterThan
+    , equal
+    , notEqual
+    , lessThanOrEqual
+    , greaterThanOrEqual
     -- * Data movement
     , gather
     , scatter
@@ -80,9 +94,15 @@ module HHLO.EDSL.Ops
     , rngUniform
     , rngNormal
     , rngBitGenerator
+    -- * Composite / convenience
+    , sigmoid
+    , sumAll
+    , pack2
+    , pack3
+    , slice1
     ) where
 
-import Prelude hiding (subtract, negate, maximum, minimum, abs, compare, map, tanh)
+import Prelude hiding (subtract, negate, maximum, minimum, abs, compare, map, tanh, sqrt, sin, cos, tan, floor, ceiling)
 
 import Data.Int (Int64)
 import Data.Proxy
@@ -137,6 +157,13 @@ minimum :: forall s1 s2 d1 d2. (s1 ~ s2, d1 ~ d2, KnownShape s1, KnownDType d1)
 minimum (Tensor x) (Tensor y) = do
     let ttype = tensorType (Proxy @s1) (Proxy @d1)
     vid <- emitOp "stablehlo.minimum" [x, y] [ttype, ttype] [] ttype
+    return (Tensor vid)
+
+pow :: forall s1 s2 d1 d2. (s1 ~ s2, d1 ~ d2, KnownShape s1, KnownDType d1)
+    => Tensor s1 d1 -> Tensor s2 d2 -> Builder (Tensor s1 d1)
+pow (Tensor x) (Tensor y) = do
+    let ttype = tensorType (Proxy @s1) (Proxy @d1)
+    vid <- emitOp "stablehlo.power" [x, y] [ttype, ttype] [] ttype
     return (Tensor vid)
 
 -- ---------------------------------------------------------------------------
@@ -298,6 +325,54 @@ erf :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor
 erf (Tensor x) = do
     let ttype = tensorType (Proxy @s) (Proxy @d)
     vid <- emitOp "stablehlo.erf" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+sqrt :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+sqrt (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.sqrt" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+rsqrt :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+rsqrt (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.rsqrt" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+sin :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+sin (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.sine" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+cos :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+cos (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.cosine" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+tan :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+tan (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.tangent" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+log1p :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+log1p (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.log_plus_one" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+floor :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+floor (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.floor" [x] [ttype] [] ttype
+    return (Tensor vid)
+
+ceil :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor s d)
+ceil (Tensor x) = do
+    let ttype = tensorType (Proxy @s) (Proxy @d)
+    vid <- emitOp "stablehlo.ceil" [x] [ttype] [] ttype
     return (Tensor vid)
 
 -- ---------------------------------------------------------------------------
@@ -584,20 +659,44 @@ conditional pred trueThunk falseThunk = do
 -- @"EQ"@, @"NE"@, @"GE"@, @"GT"@, @"LE"@, @"LT"@.
 compare :: forall s d.
            (KnownShape s, KnownDType d)
-        => Tensor s d -> Tensor s d -> Text -> Builder (Tensor '[] 'Bool)
+        => Tensor s d -> Tensor s d -> Text -> Builder (Tensor s 'Bool)
 compare (Tensor x) (Tensor y) direction = do
     let inType  = tensorType (Proxy @s) (Proxy @d)
-        outType = tensorType (Proxy @'[]) (Proxy @'Bool)
+        outType = tensorType (Proxy @s) (Proxy @'Bool)
     vid <- emitOp "stablehlo.compare" [x, y] [inType, inType]
         [ AttrRaw ("comparison_direction = #stablehlo<comparison_direction " <> direction <> ">")
         ] outType
     return (Tensor vid)
 
--- | Convenience wrapper for 'compare' with @"LT"@ direction.
 lessThan :: forall s d.
             (KnownShape s, KnownDType d)
-         => Tensor s d -> Tensor s d -> Builder (Tensor '[] 'Bool)
+         => Tensor s d -> Tensor s d -> Builder (Tensor s 'Bool)
 lessThan x y = compare x y "LT"
+
+greaterThan :: forall s d.
+               (KnownShape s, KnownDType d)
+            => Tensor s d -> Tensor s d -> Builder (Tensor s 'Bool)
+greaterThan x y = compare x y "GT"
+
+equal :: forall s d.
+         (KnownShape s, KnownDType d)
+      => Tensor s d -> Tensor s d -> Builder (Tensor s 'Bool)
+equal x y = compare x y "EQ"
+
+notEqual :: forall s d.
+            (KnownShape s, KnownDType d)
+         => Tensor s d -> Tensor s d -> Builder (Tensor s 'Bool)
+notEqual x y = compare x y "NE"
+
+lessThanOrEqual :: forall s d.
+                   (KnownShape s, KnownDType d)
+                => Tensor s d -> Tensor s d -> Builder (Tensor s 'Bool)
+lessThanOrEqual x y = compare x y "LE"
+
+greaterThanOrEqual :: forall s d.
+                      (KnownShape s, KnownDType d)
+                   => Tensor s d -> Tensor s d -> Builder (Tensor s 'Bool)
+greaterThanOrEqual x y = compare x y "GE"
 
 -- ---------------------------------------------------------------------------
 -- Data movement
@@ -1379,3 +1478,44 @@ rngBitGenerator state = do
     case vids of
         [vidState, vidOut] -> return (Tensor vidState, Tensor vidOut)
         _                  -> error "rngBitGenerator: expected exactly two results"
+
+-- ---------------------------------------------------------------------------
+-- Composite / convenience ops
+-- ---------------------------------------------------------------------------
+
+-- | Sigmoid activation: @1 / (1 + exp(-x))@.
+sigmoid :: forall s. KnownShape s => Tensor s 'F32 -> Builder (Tensor s 'F32)
+sigmoid x = do
+    negX    <- negate x
+    expNegX <- exponential negX
+    one     <- constant @s @'F32 1.0
+    denom   <- add one expNegX
+    divide one denom
+
+-- | Reduce-sum over all dimensions, producing a scalar.
+sumAll :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor '[] d)
+sumAll = reduceSum
+
+-- | Extract a single scalar element from a 1-D tensor at a constant index.
+slice1 :: forall n d. (KnownShape '[n], KnownDType d)
+       => Tensor '[n] d -> Int64 -> Builder (Tensor '[] d)
+slice1 vec i = do
+    sliced <- slice @'[n] @'[1] @d vec [i] [i + 1] [1]
+    reshape @'[1] @'[] sliced
+
+-- | Pack two scalar tensors into a rank-1 tensor of shape @[2]@.
+pack2 :: forall d. KnownDType d
+      => Tensor '[] d -> Tensor '[] d -> Builder (Tensor '[2] d)
+pack2 x y = do
+    x1 <- reshape @'[] @'[1] x
+    y1 <- reshape @'[] @'[1] y
+    concatenate @'[1] @'[2] @d 0 [x1, y1]
+
+-- | Pack three scalar tensors into a rank-1 tensor of shape @[3]@.
+pack3 :: forall d. KnownDType d
+      => Tensor '[] d -> Tensor '[] d -> Tensor '[] d -> Builder (Tensor '[3] d)
+pack3 x y z = do
+    x1 <- reshape @'[] @'[1] x
+    y1 <- reshape @'[] @'[1] y
+    z1 <- reshape @'[] @'[1] z
+    concatenate @'[1] @'[3] @d 0 [x1, y1, z1]

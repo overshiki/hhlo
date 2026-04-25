@@ -100,6 +100,38 @@ normal   <- rngNormal            -- standard normal (mean 0, std 1)
 (newSt, bits) <- rngBitGenerator state   -- Threefry bit generator
 ```
 
+**Extended Math Primitives**
+
+Element-wise ops covering the full HBayesian requirements:
+```haskell
+y <- sqrt x          -- square root
+y <- rsqrt x         -- reciprocal sqrt
+y <- sin x           -- sine
+y <- cos x           -- cosine
+y <- tan x           -- tangent
+y <- pow x e         -- element-wise power
+y <- log1p x         -- log(1+x)
+y <- floor x         -- floor
+y <- ceil x          -- ceiling
+y <- sigmoid x       -- 1 / (1 + exp(-x))
+```
+
+**Shape-Preserving Comparisons**
+
+`compare` and its wrappers return `Tensor s 'Bool` (same shape as inputs), matching StableHLO semantics:
+```haskell
+mask <- equal x y                -- element-wise equality
+mask <- greaterThan x y          -- element-wise >
+mask <- lessThanOrEqual x y      -- element-wise <=
+```
+
+Convenience ops for scalar manipulation:
+```haskell
+s <- sumAll x          -- reduce all dimensions to scalar
+v <- slice1 vec i      -- extract scalar from 1-D tensor
+packed <- pack2 a b    -- pack two scalars into [2]
+```
+
 ---
 
 ## Installation
@@ -269,7 +301,7 @@ Standalone examples are provided in `examples/`:
 cabal test
 ```
 
-Runs **124 tests** across three tiers:
+Runs **141 tests** across three tiers:
 
 - **Tier 1 — Golden tests** — Verify rendered MLIR text for EDSL ops, IR constructs, NN layers, and control flow.
 - **Tier 2 — End-to-end runtime tests** — Load the PJRT CPU plugin, compile StableHLO programs, execute them, and verify numerical results. Covers arithmetic, matmul, reductions, data movement, and NN ops.
@@ -281,7 +313,7 @@ Runs **124 tests** across three tiers:
 HHLO_TEST_GPU=1 cabal test
 ```
 
-Runs the full 124 CPU tests **plus** 6 additional GPU integration tests:
+Runs the full 141 CPU tests **plus** 6 additional GPU integration tests:
 
 - `EndToEnd.GPU` — GPU availability and device enumeration
 - `Runtime.BufferGPU` — Buffer round-trip and metadata queries on GPU
@@ -311,7 +343,7 @@ HHLO Tests
   Runtime.MultiGPU
     execute replicas on all GPUs:     OK
 
-All 130 tests passed (16.27s)
+All 147 tests passed (16.27s)
 ```
 
 ---
