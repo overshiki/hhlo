@@ -12,6 +12,10 @@
 
 ## 0.2.0.0 -- 2026-04-22
 
+**BREAKING**: `Operation` AST changed from single-result to multi-result.
+Any code using `opResult` / `opResultType` or pattern-matching on the
+`Operation` constructor must update to `opResults` / `opResultTypes`.
+
 * Multi-result `Operation` AST — `Operation` now supports `opResults :: [ValueId]`
   and `opResultTypes :: [TensorType]`, enabling ops with multiple outputs such as
   `stablehlo.rng_bit_generator`.
@@ -29,6 +33,14 @@
 * New examples: `30-rng-uniform`, `31-rng-normal`, `32-rng-bit-generator`,
   `33-multi-value-loop`.
 * Updated example `12-while` from print-only to fully executable.
+* Test count: 124 CPU tests + 6 GPU integration tests.
+
+## 0.3.0.0 -- 2026-04-25
+
+**BREAKING**: `compare` and `lessThan` now return shape-preserving
+`Tensor s 'Bool` instead of scalar `Tensor '[] 'Bool`. New exports
+`sqrt`, `sin`, `cos`, `tan`, `floor`, `ceil` may conflict with Prelude.
+
 * New primitive ops: `sqrt`, `rsqrt`, `sin`, `cos`, `tan`, `pow`, `log1p`, `floor`, `ceil`.
 * New composite / convenience ops: `sigmoid`, `sumAll`, `pack2`, `pack3`, `slice1`.
 * Fixed `compare` to return shape-preserving `Tensor s 'Bool` per StableHLO spec.
