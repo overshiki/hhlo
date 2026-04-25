@@ -476,6 +476,45 @@ tests = testGroup "EDSL.Ops"
                         return z
             let rendered = render modu
             assertBool "stablehlo.if" $ "stablehlo.if" `T.isInfixOf` rendered
+        , testCase "whileLoop3" $ do
+            let modu = moduleFromBuilder3 @'[2] @'F32 @'[2] @'F32 @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32)
+                    , FuncArg "arg1" (TensorType [2] F32)
+                    , FuncArg "arg2" (TensorType [2] F32)
+                    ]
+                    $ do
+                        x <- arg @'[2] @'F32
+                        y <- arg @'[2] @'F32
+                        z <- arg @'[2] @'F32
+                        r <- whileLoop3 x y z
+                            (\a b c -> do
+                                s <- reduceSum a
+                                t <- constant @'[] @'F32 100.0
+                                lessThan s t)
+                            (\a b c -> do
+                                a' <- add a a
+                                b' <- add b b
+                                c' <- add c c
+                                returnTuple3 a' b' c')
+                        return r
+            let rendered = render modu
+            assertBool "stablehlo.while" $ "stablehlo.while" `T.isInfixOf` rendered
+        , testCase "conditional3" $ do
+            let modu = moduleFromBuilder3 @'[2] @'F32 @'[2] @'F32 @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32)
+                    , FuncArg "arg1" (TensorType [2] F32)
+                    , FuncArg "arg2" (TensorType [2] F32)
+                    , FuncArg "pred" (TensorType [] Bool)
+                    ]
+                    $ do
+                        x <- arg @'[2] @'F32
+                        y <- arg @'[2] @'F32
+                        z <- arg @'[2] @'F32
+                        p <- arg @'[] @'Bool
+                        r <- conditional3 p (returnTuple3 x x x) (returnTuple3 y y z)
+                        return r
+            let rendered = render modu
+            assertBool "stablehlo.if" $ "stablehlo.if" `T.isInfixOf` rendered
         ]
     , testGroup "RNG"
         [ testCase "rngUniform" $ do

@@ -208,4 +208,53 @@ tests = testGroup "EndToEnd.DataMovement"
         [bufOut] <- execute api exec [bufIn]
         result <- fromDeviceF32 api bufOut 2
         result @?= V.fromList [1.0, 2.0]
+    , testCase "logicalAnd" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[3] @'Bool "main"
+                [ FuncArg "arg0" (TensorType [3] Bool)
+                , FuncArg "arg1" (TensorType [3] Bool)
+                ]
+                $ do
+                    a <- arg @'[3] @'Bool
+                    b <- arg @'[3] @'Bool
+                    c <- logicalAnd a b
+                    return c
+        exec <- compile api client (render modu)
+        let va = V.fromList [1, 1, 0] :: V.Vector Word8
+            vb = V.fromList [1, 0, 0] :: V.Vector Word8
+        bufA <- toDevice api client va [3] bufferTypePred
+        bufB <- toDevice api client vb [3] bufferTypePred
+        [bufOut] <- execute api exec [bufA, bufB]
+        result <- fromDevice api bufOut 3 :: IO (V.Vector Word8)
+        result @?= V.fromList [1, 0, 0]
+    , testCase "logicalOr" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[3] @'Bool "main"
+                [ FuncArg "arg0" (TensorType [3] Bool)
+                , FuncArg "arg1" (TensorType [3] Bool)
+                ]
+                $ do
+                    a <- arg @'[3] @'Bool
+                    b <- arg @'[3] @'Bool
+                    c <- logicalOr a b
+                    return c
+        exec <- compile api client (render modu)
+        let va = V.fromList [1, 1, 0] :: V.Vector Word8
+            vb = V.fromList [1, 0, 0] :: V.Vector Word8
+        bufA <- toDevice api client va [3] bufferTypePred
+        bufB <- toDevice api client vb [3] bufferTypePred
+        [bufOut] <- execute api exec [bufA, bufB]
+        result <- fromDevice api bufOut 3 :: IO (V.Vector Word8)
+        result @?= V.fromList [1, 1, 0]
+    , testCase "logicalNot" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[3] @'Bool "main"
+                [ FuncArg "arg0" (TensorType [3] Bool) ]
+                $ do
+                    a <- arg @'[3] @'Bool
+                    b <- logicalNot a
+                    return b
+        exec <- compile api client (render modu)
+        let va = V.fromList [1, 0, 1] :: V.Vector Word8
+        bufA <- toDevice api client va [3] bufferTypePred
+        [bufOut] <- execute api exec [bufA]
+        result <- fromDevice api bufOut 3 :: IO (V.Vector Word8)
+        result @?= V.fromList [0, 1, 0]
     ]

@@ -62,8 +62,20 @@ module HHLO.EDSL.Ops
     , whileLoop
     , whileLoopN
     , whileLoop2
+    , whileLoop3
+    , whileLoop4
+    , whileLoop5
+    , whileLoop6
+    , whileLoop7
+    , whileLoop8
     , conditional
     , conditional2
+    , conditional3
+    , conditional4
+    , conditional5
+    , conditional6
+    , conditional7
+    , conditional8
     , compare
     , lessThan
     , greaterThan
@@ -71,6 +83,9 @@ module HHLO.EDSL.Ops
     , notEqual
     , lessThanOrEqual
     , greaterThanOrEqual
+    , logicalAnd
+    , logicalOr
+    , logicalNot
     -- * Data movement
     , gather
     , scatter
@@ -87,7 +102,19 @@ module HHLO.EDSL.Ops
     , constant
     -- * Tuple
     , Tuple2(..)
+    , Tuple3(..)
+    , Tuple4(..)
+    , Tuple5(..)
+    , Tuple6(..)
+    , Tuple7(..)
+    , Tuple8(..)
     , returnTuple2
+    , returnTuple3
+    , returnTuple4
+    , returnTuple5
+    , returnTuple6
+    , returnTuple7
+    , returnTuple8
     , Tuple(..)
     , returnT
     -- * Random number generation
@@ -584,6 +611,24 @@ constant val = do
 returnTuple2 :: Tensor s1 d1 -> Tensor s2 d2 -> Builder (Tuple2 s1 d1 s2 d2)
 returnTuple2 t1 t2 = return (Tuple2 t1 t2)
 
+returnTuple3 :: Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Builder (Tuple3 s1 d1 s2 d2 s3 d3)
+returnTuple3 t1 t2 t3 = return (Tuple3 t1 t2 t3)
+
+returnTuple4 :: Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4)
+returnTuple4 t1 t2 t3 t4 = return (Tuple4 t1 t2 t3 t4)
+
+returnTuple5 :: Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5)
+returnTuple5 t1 t2 t3 t4 t5 = return (Tuple5 t1 t2 t3 t4 t5)
+
+returnTuple6 :: Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6)
+returnTuple6 t1 t2 t3 t4 t5 t6 = return (Tuple6 t1 t2 t3 t4 t5 t6)
+
+returnTuple7 :: Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Tensor s7 d7 -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7)
+returnTuple7 t1 t2 t3 t4 t5 t6 t7 = return (Tuple7 t1 t2 t3 t4 t5 t6 t7)
+
+returnTuple8 :: Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Tensor s7 d7 -> Tensor s8 d8 -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8)
+returnTuple8 t1 t2 t3 t4 t5 t6 t7 t8 = return (Tuple8 t1 t2 t3 t4 t5 t6 t7 t8)
+
 -- | Return a heterogeneous tuple of tensors from a multi-result builder.
 returnT :: Tuple ss ds -> Builder (Tuple ss ds)
 returnT = return
@@ -933,6 +978,27 @@ select pred onTrue onFalse = do
             [predType, valType, valType]
             [] valType
     return (Tensor vid)
+
+-- | Element-wise logical AND.
+--
+-- Both inputs must be boolean tensors of the same shape.
+logicalAnd :: forall s. KnownShape s => Tensor s 'Bool -> Tensor s 'Bool -> Builder (Tensor s 'Bool)
+logicalAnd a b = do
+    falseVal <- constant @s @'Bool 0.0
+    select a b falseVal
+
+-- | Element-wise logical OR.
+logicalOr :: forall s. KnownShape s => Tensor s 'Bool -> Tensor s 'Bool -> Builder (Tensor s 'Bool)
+logicalOr a b = do
+    trueVal <- constant @s @'Bool 1.0
+    select a trueVal b
+
+-- | Element-wise logical NOT.
+logicalNot :: forall s. KnownShape s => Tensor s 'Bool -> Builder (Tensor s 'Bool)
+logicalNot a = do
+    falseVal <- constant @s @'Bool 0.0
+    trueVal  <- constant @s @'Bool 1.0
+    select a falseVal trueVal
 
 -- | Element-wise map over specified dimensions of one or more tensors.
 --
@@ -1316,6 +1382,161 @@ whileLoop2 init1 init2 cond body = do
         [vid1, vid2] -> return (Tuple2 (Tensor vid1) (Tensor vid2))
         _            -> error "whileLoop2: expected exactly two results"
 
+whileLoop3 :: forall s1 d1 s2 d2 s3 d3.
+              (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3)
+           => Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Builder (Tensor '[] 'Bool))
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Builder (Tuple3 s1 d1 s2 d2 s3 d3))
+           -> Builder (Tuple3 s1 d1 s2 d2 s3 d3)
+whileLoop3 init1 init2 init3 cond body = do
+    let initVids  = [tensorValue init1, tensorValue init2, tensorValue init3]
+        initTypes = [ tensorType (Proxy @s1) (Proxy @d1)
+                    , tensorType (Proxy @s2) (Proxy @d2)
+                    , tensorType (Proxy @s3) (Proxy @d3)
+                    ]
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+    condBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1
+        v2 <- arg @s2 @d2
+        v3 <- arg @s3 @d3
+        c  <- cond v1 v2 v3
+        emitReturn [tensorValue c] [boolType]
+    bodyBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1
+        v2 <- arg @s2 @d2
+        v3 <- arg @s3 @d3
+        Tuple3 r1 r2 r3 <- body v1 v2 v3
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3] initTypes
+    vids <- emitOpRegionsN "stablehlo.while" initVids initTypes []
+              [Region [condBlock], Region [bodyBlock]] initTypes
+    case vids of
+        [vid1, vid2, vid3] -> return (Tuple3 (Tensor vid1) (Tensor vid2) (Tensor vid3))
+        _                  -> error "whileLoop3: expected exactly three results"
+
+whileLoop4 :: forall s1 d1 s2 d2 s3 d3 s4 d4.
+              (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4)
+           => Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Builder (Tensor '[] 'Bool))
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4))
+           -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4)
+whileLoop4 init1 init2 init3 init4 cond body = do
+    let initVids  = [tensorValue init1, tensorValue init2, tensorValue init3, tensorValue init4]
+        initTypes = [ tensorType (Proxy @s1) (Proxy @d1)
+                    , tensorType (Proxy @s2) (Proxy @d2)
+                    , tensorType (Proxy @s3) (Proxy @d3)
+                    , tensorType (Proxy @s4) (Proxy @d4)
+                    ]
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+    condBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4
+        c  <- cond v1 v2 v3 v4
+        emitReturn [tensorValue c] [boolType]
+    bodyBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4
+        Tuple4 r1 r2 r3 r4 <- body v1 v2 v3 v4
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4] initTypes
+    vids <- emitOpRegionsN "stablehlo.while" initVids initTypes []
+              [Region [condBlock], Region [bodyBlock]] initTypes
+    case vids of
+        [vid1, vid2, vid3, vid4] -> return (Tuple4 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4))
+        _                        -> error "whileLoop4: expected exactly four results"
+
+whileLoop5 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5.
+              (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5)
+           => Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Builder (Tensor '[] 'Bool))
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5))
+           -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5)
+whileLoop5 init1 init2 init3 init4 init5 cond body = do
+    let initVids  = [tensorValue init1, tensorValue init2, tensorValue init3, tensorValue init4, tensorValue init5]
+        initTypes = [ tensorType (Proxy @s1) (Proxy @d1), tensorType (Proxy @s2) (Proxy @d2), tensorType (Proxy @s3) (Proxy @d3), tensorType (Proxy @s4) (Proxy @d4), tensorType (Proxy @s5) (Proxy @d5) ]
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+    condBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4; v5 <- arg @s5 @d5
+        c  <- cond v1 v2 v3 v4 v5
+        emitReturn [tensorValue c] [boolType]
+    bodyBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4; v5 <- arg @s5 @d5
+        Tuple5 r1 r2 r3 r4 r5 <- body v1 v2 v3 v4 v5
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5] initTypes
+    vids <- emitOpRegionsN "stablehlo.while" initVids initTypes []
+              [Region [condBlock], Region [bodyBlock]] initTypes
+    case vids of
+        [vid1, vid2, vid3, vid4, vid5] -> return (Tuple5 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4) (Tensor vid5))
+        _                              -> error "whileLoop5: expected exactly five results"
+
+whileLoop6 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6.
+              (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6)
+           => Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Builder (Tensor '[] 'Bool))
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6))
+           -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6)
+whileLoop6 init1 init2 init3 init4 init5 init6 cond body = do
+    let initVids  = [tensorValue init1, tensorValue init2, tensorValue init3, tensorValue init4, tensorValue init5, tensorValue init6]
+        initTypes = [ tensorType (Proxy @s1) (Proxy @d1), tensorType (Proxy @s2) (Proxy @d2), tensorType (Proxy @s3) (Proxy @d3), tensorType (Proxy @s4) (Proxy @d4), tensorType (Proxy @s5) (Proxy @d5), tensorType (Proxy @s6) (Proxy @d6) ]
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+    condBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4; v5 <- arg @s5 @d5; v6 <- arg @s6 @d6
+        c  <- cond v1 v2 v3 v4 v5 v6
+        emitReturn [tensorValue c] [boolType]
+    bodyBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4; v5 <- arg @s5 @d5; v6 <- arg @s6 @d6
+        Tuple6 r1 r2 r3 r4 r5 r6 <- body v1 v2 v3 v4 v5 v6
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6] initTypes
+    vids <- emitOpRegionsN "stablehlo.while" initVids initTypes []
+              [Region [condBlock], Region [bodyBlock]] initTypes
+    case vids of
+        [vid1, vid2, vid3, vid4, vid5, vid6] -> return (Tuple6 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4) (Tensor vid5) (Tensor vid6))
+        _                                    -> error "whileLoop6: expected exactly six results"
+
+whileLoop7 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7.
+              (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7)
+           => Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Tensor s7 d7
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Tensor s7 d7 -> Builder (Tensor '[] 'Bool))
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Tensor s7 d7 -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7))
+           -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7)
+whileLoop7 init1 init2 init3 init4 init5 init6 init7 cond body = do
+    let initVids  = [tensorValue init1, tensorValue init2, tensorValue init3, tensorValue init4, tensorValue init5, tensorValue init6, tensorValue init7]
+        initTypes = [ tensorType (Proxy @s1) (Proxy @d1), tensorType (Proxy @s2) (Proxy @d2), tensorType (Proxy @s3) (Proxy @d3), tensorType (Proxy @s4) (Proxy @d4), tensorType (Proxy @s5) (Proxy @d5), tensorType (Proxy @s6) (Proxy @d6), tensorType (Proxy @s7) (Proxy @d7) ]
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+    condBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4; v5 <- arg @s5 @d5; v6 <- arg @s6 @d6; v7 <- arg @s7 @d7
+        c  <- cond v1 v2 v3 v4 v5 v6 v7
+        emitReturn [tensorValue c] [boolType]
+    bodyBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4; v5 <- arg @s5 @d5; v6 <- arg @s6 @d6; v7 <- arg @s7 @d7
+        Tuple7 r1 r2 r3 r4 r5 r6 r7 <- body v1 v2 v3 v4 v5 v6 v7
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6, tensorValue r7] initTypes
+    vids <- emitOpRegionsN "stablehlo.while" initVids initTypes []
+              [Region [condBlock], Region [bodyBlock]] initTypes
+    case vids of
+        [vid1, vid2, vid3, vid4, vid5, vid6, vid7] -> return (Tuple7 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4) (Tensor vid5) (Tensor vid6) (Tensor vid7))
+        _                                          -> error "whileLoop7: expected exactly seven results"
+
+whileLoop8 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8.
+              (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7, KnownShape s8, KnownDType d8)
+           => Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Tensor s7 d7 -> Tensor s8 d8
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Tensor s7 d7 -> Tensor s8 d8 -> Builder (Tensor '[] 'Bool))
+           -> (Tensor s1 d1 -> Tensor s2 d2 -> Tensor s3 d3 -> Tensor s4 d4 -> Tensor s5 d5 -> Tensor s6 d6 -> Tensor s7 d7 -> Tensor s8 d8 -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8))
+           -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8)
+whileLoop8 init1 init2 init3 init4 init5 init6 init7 init8 cond body = do
+    let initVids  = [tensorValue init1, tensorValue init2, tensorValue init3, tensorValue init4, tensorValue init5, tensorValue init6, tensorValue init7, tensorValue init8]
+        initTypes = [ tensorType (Proxy @s1) (Proxy @d1), tensorType (Proxy @s2) (Proxy @d2), tensorType (Proxy @s3) (Proxy @d3), tensorType (Proxy @s4) (Proxy @d4), tensorType (Proxy @s5) (Proxy @d5), tensorType (Proxy @s6) (Proxy @d6), tensorType (Proxy @s7) (Proxy @d7), tensorType (Proxy @s8) (Proxy @d8) ]
+        boolType  = tensorType (Proxy @'[]) (Proxy @'Bool)
+    condBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4; v5 <- arg @s5 @d5; v6 <- arg @s6 @d6; v7 <- arg @s7 @d7; v8 <- arg @s8 @d8
+        c  <- cond v1 v2 v3 v4 v5 v6 v7 v8
+        emitReturn [tensorValue c] [boolType]
+    bodyBlock <- runBlockBuilder initTypes $ do
+        v1 <- arg @s1 @d1; v2 <- arg @s2 @d2; v3 <- arg @s3 @d3; v4 <- arg @s4 @d4; v5 <- arg @s5 @d5; v6 <- arg @s6 @d6; v7 <- arg @s7 @d7; v8 <- arg @s8 @d8
+        Tuple8 r1 r2 r3 r4 r5 r6 r7 r8 <- body v1 v2 v3 v4 v5 v6 v7 v8
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6, tensorValue r7, tensorValue r8] initTypes
+    vids <- emitOpRegionsN "stablehlo.while" initVids initTypes []
+              [Region [condBlock], Region [bodyBlock]] initTypes
+    case vids of
+        [vid1, vid2, vid3, vid4, vid5, vid6, vid7, vid8] -> return (Tuple8 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4) (Tensor vid5) (Tensor vid6) (Tensor vid7) (Tensor vid8))
+        _                                                -> error "whileLoop8: expected exactly eight results"
+
 -- | While loop carrying N tensors of the same shape and dtype.
 --
 -- This is useful for batch loops or when all carried values are homogeneous.
@@ -1377,6 +1598,145 @@ conditional2 pred trueThunk falseThunk = do
     case vids of
         [vid1, vid2] -> return (Tuple2 (Tensor vid1) (Tensor vid2))
         _            -> error "conditional2: expected exactly two results"
+
+conditional3 :: forall s1 d1 s2 d2 s3 d3.
+                (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3)
+             => Tensor '[] 'Bool
+             -> Builder (Tuple3 s1 d1 s2 d2 s3 d3)
+             -> Builder (Tuple3 s1 d1 s2 d2 s3 d3)
+             -> Builder (Tuple3 s1 d1 s2 d2 s3 d3)
+conditional3 pred trueThunk falseThunk = do
+    let ttype1 = tensorType (Proxy @s1) (Proxy @d1)
+        ttype2 = tensorType (Proxy @s2) (Proxy @d2)
+        ttype3 = tensorType (Proxy @s3) (Proxy @d3)
+        types  = [ttype1, ttype2, ttype3]
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+    trueBlock <- runBlockBuilder [] $ do
+        Tuple3 r1 r2 r3 <- trueThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3] types
+    falseBlock <- runBlockBuilder [] $ do
+        Tuple3 r1 r2 r3 <- falseThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3] types
+    let (Tensor predVid) = pred
+    vids <- emitOpRegionsN "stablehlo.if" [predVid] [boolType] []
+              [Region [trueBlock], Region [falseBlock]] types
+    case vids of
+        [vid1, vid2, vid3] -> return (Tuple3 (Tensor vid1) (Tensor vid2) (Tensor vid3))
+        _                  -> error "conditional3: expected exactly three results"
+
+conditional4 :: forall s1 d1 s2 d2 s3 d3 s4 d4.
+                (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4)
+             => Tensor '[] 'Bool
+             -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4)
+             -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4)
+             -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4)
+conditional4 pred trueThunk falseThunk = do
+    let ttype1 = tensorType (Proxy @s1) (Proxy @d1)
+        ttype2 = tensorType (Proxy @s2) (Proxy @d2)
+        ttype3 = tensorType (Proxy @s3) (Proxy @d3)
+        ttype4 = tensorType (Proxy @s4) (Proxy @d4)
+        types  = [ttype1, ttype2, ttype3, ttype4]
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+    trueBlock <- runBlockBuilder [] $ do
+        Tuple4 r1 r2 r3 r4 <- trueThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4] types
+    falseBlock <- runBlockBuilder [] $ do
+        Tuple4 r1 r2 r3 r4 <- falseThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4] types
+    let (Tensor predVid) = pred
+    vids <- emitOpRegionsN "stablehlo.if" [predVid] [boolType] []
+              [Region [trueBlock], Region [falseBlock]] types
+    case vids of
+        [vid1, vid2, vid3, vid4] -> return (Tuple4 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4))
+        _                        -> error "conditional4: expected exactly four results"
+
+conditional5 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5.
+                (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5)
+             => Tensor '[] 'Bool
+             -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5)
+             -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5)
+             -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5)
+conditional5 pred trueThunk falseThunk = do
+    let types = [ tensorType (Proxy @s1) (Proxy @d1), tensorType (Proxy @s2) (Proxy @d2), tensorType (Proxy @s3) (Proxy @d3), tensorType (Proxy @s4) (Proxy @d4), tensorType (Proxy @s5) (Proxy @d5) ]
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+    trueBlock <- runBlockBuilder [] $ do
+        Tuple5 r1 r2 r3 r4 r5 <- trueThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5] types
+    falseBlock <- runBlockBuilder [] $ do
+        Tuple5 r1 r2 r3 r4 r5 <- falseThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5] types
+    let (Tensor predVid) = pred
+    vids <- emitOpRegionsN "stablehlo.if" [predVid] [boolType] []
+              [Region [trueBlock], Region [falseBlock]] types
+    case vids of
+        [vid1, vid2, vid3, vid4, vid5] -> return (Tuple5 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4) (Tensor vid5))
+        _                              -> error "conditional5: expected exactly five results"
+
+conditional6 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6.
+                (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6)
+             => Tensor '[] 'Bool
+             -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6)
+             -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6)
+             -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6)
+conditional6 pred trueThunk falseThunk = do
+    let types = [ tensorType (Proxy @s1) (Proxy @d1), tensorType (Proxy @s2) (Proxy @d2), tensorType (Proxy @s3) (Proxy @d3), tensorType (Proxy @s4) (Proxy @d4), tensorType (Proxy @s5) (Proxy @d5), tensorType (Proxy @s6) (Proxy @d6) ]
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+    trueBlock <- runBlockBuilder [] $ do
+        Tuple6 r1 r2 r3 r4 r5 r6 <- trueThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6] types
+    falseBlock <- runBlockBuilder [] $ do
+        Tuple6 r1 r2 r3 r4 r5 r6 <- falseThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6] types
+    let (Tensor predVid) = pred
+    vids <- emitOpRegionsN "stablehlo.if" [predVid] [boolType] []
+              [Region [trueBlock], Region [falseBlock]] types
+    case vids of
+        [vid1, vid2, vid3, vid4, vid5, vid6] -> return (Tuple6 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4) (Tensor vid5) (Tensor vid6))
+        _                                    -> error "conditional6: expected exactly six results"
+
+conditional7 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7.
+                (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7)
+             => Tensor '[] 'Bool
+             -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7)
+             -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7)
+             -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7)
+conditional7 pred trueThunk falseThunk = do
+    let types = [ tensorType (Proxy @s1) (Proxy @d1), tensorType (Proxy @s2) (Proxy @d2), tensorType (Proxy @s3) (Proxy @d3), tensorType (Proxy @s4) (Proxy @d4), tensorType (Proxy @s5) (Proxy @d5), tensorType (Proxy @s6) (Proxy @d6), tensorType (Proxy @s7) (Proxy @d7) ]
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+    trueBlock <- runBlockBuilder [] $ do
+        Tuple7 r1 r2 r3 r4 r5 r6 r7 <- trueThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6, tensorValue r7] types
+    falseBlock <- runBlockBuilder [] $ do
+        Tuple7 r1 r2 r3 r4 r5 r6 r7 <- falseThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6, tensorValue r7] types
+    let (Tensor predVid) = pred
+    vids <- emitOpRegionsN "stablehlo.if" [predVid] [boolType] []
+              [Region [trueBlock], Region [falseBlock]] types
+    case vids of
+        [vid1, vid2, vid3, vid4, vid5, vid6, vid7] -> return (Tuple7 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4) (Tensor vid5) (Tensor vid6) (Tensor vid7))
+        _                                          -> error "conditional7: expected exactly seven results"
+
+conditional8 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8.
+                (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7, KnownShape s8, KnownDType d8)
+             => Tensor '[] 'Bool
+             -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8)
+             -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8)
+             -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8)
+conditional8 pred trueThunk falseThunk = do
+    let types = [ tensorType (Proxy @s1) (Proxy @d1), tensorType (Proxy @s2) (Proxy @d2), tensorType (Proxy @s3) (Proxy @d3), tensorType (Proxy @s4) (Proxy @d4), tensorType (Proxy @s5) (Proxy @d5), tensorType (Proxy @s6) (Proxy @d6), tensorType (Proxy @s7) (Proxy @d7), tensorType (Proxy @s8) (Proxy @d8) ]
+        boolType = tensorType (Proxy @'[]) (Proxy @'Bool)
+    trueBlock <- runBlockBuilder [] $ do
+        Tuple8 r1 r2 r3 r4 r5 r6 r7 r8 <- trueThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6, tensorValue r7, tensorValue r8] types
+    falseBlock <- runBlockBuilder [] $ do
+        Tuple8 r1 r2 r3 r4 r5 r6 r7 r8 <- falseThunk
+        emitReturn [tensorValue r1, tensorValue r2, tensorValue r3, tensorValue r4, tensorValue r5, tensorValue r6, tensorValue r7, tensorValue r8] types
+    let (Tensor predVid) = pred
+    vids <- emitOpRegionsN "stablehlo.if" [predVid] [boolType] []
+              [Region [trueBlock], Region [falseBlock]] types
+    case vids of
+        [vid1, vid2, vid3, vid4, vid5, vid6, vid7, vid8] -> return (Tuple8 (Tensor vid1) (Tensor vid2) (Tensor vid3) (Tensor vid4) (Tensor vid5) (Tensor vid6) (Tensor vid7) (Tensor vid8))
+        _                                                -> error "conditional8: expected exactly eight results"
 
 -- | If-then-else selecting between N tensor values of the same shape/dtype.
 --

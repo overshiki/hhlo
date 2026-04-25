@@ -12,6 +12,12 @@ module HHLO.IR.Builder
     , runBuilderT
     , Tensor(..)
     , Tuple2(..)
+    , Tuple3(..)
+    , Tuple4(..)
+    , Tuple5(..)
+    , Tuple6(..)
+    , Tuple7(..)
+    , Tuple8(..)
     , Tuple(..)
     , TupleBuilder(..)
     , emitOp
@@ -25,6 +31,12 @@ module HHLO.IR.Builder
     , argNamed
     , moduleFromBuilder
     , moduleFromBuilder2
+    , moduleFromBuilder3
+    , moduleFromBuilder4
+    , moduleFromBuilder5
+    , moduleFromBuilder6
+    , moduleFromBuilder7
+    , moduleFromBuilder8
     , moduleFromBuilderT
     , tensorType
     , KnownDType(..)
@@ -58,6 +70,36 @@ newtype Tensor (s :: Shape) (d :: DType) = Tensor
 -- | A pair of tensors for functions with two results.
 data Tuple2 (s1 :: Shape) (d1 :: DType) (s2 :: Shape) (d2 :: DType)
     = Tuple2 (Tensor s1 d1) (Tensor s2 d2)
+    deriving (Eq, Show)
+
+-- | Three heterogeneous tensors.
+data Tuple3 (s1 :: Shape) (d1 :: DType) (s2 :: Shape) (d2 :: DType) (s3 :: Shape) (d3 :: DType)
+    = Tuple3 (Tensor s1 d1) (Tensor s2 d2) (Tensor s3 d3)
+    deriving (Eq, Show)
+
+-- | Four heterogeneous tensors.
+data Tuple4 (s1 :: Shape) (d1 :: DType) (s2 :: Shape) (d2 :: DType) (s3 :: Shape) (d3 :: DType) (s4 :: Shape) (d4 :: DType)
+    = Tuple4 (Tensor s1 d1) (Tensor s2 d2) (Tensor s3 d3) (Tensor s4 d4)
+    deriving (Eq, Show)
+
+-- | Five heterogeneous tensors.
+data Tuple5 (s1 :: Shape) (d1 :: DType) (s2 :: Shape) (d2 :: DType) (s3 :: Shape) (d3 :: DType) (s4 :: Shape) (d4 :: DType) (s5 :: Shape) (d5 :: DType)
+    = Tuple5 (Tensor s1 d1) (Tensor s2 d2) (Tensor s3 d3) (Tensor s4 d4) (Tensor s5 d5)
+    deriving (Eq, Show)
+
+-- | Six heterogeneous tensors.
+data Tuple6 (s1 :: Shape) (d1 :: DType) (s2 :: Shape) (d2 :: DType) (s3 :: Shape) (d3 :: DType) (s4 :: Shape) (d4 :: DType) (s5 :: Shape) (d5 :: DType) (s6 :: Shape) (d6 :: DType)
+    = Tuple6 (Tensor s1 d1) (Tensor s2 d2) (Tensor s3 d3) (Tensor s4 d4) (Tensor s5 d5) (Tensor s6 d6)
+    deriving (Eq, Show)
+
+-- | Seven heterogeneous tensors.
+data Tuple7 (s1 :: Shape) (d1 :: DType) (s2 :: Shape) (d2 :: DType) (s3 :: Shape) (d3 :: DType) (s4 :: Shape) (d4 :: DType) (s5 :: Shape) (d5 :: DType) (s6 :: Shape) (d6 :: DType) (s7 :: Shape) (d7 :: DType)
+    = Tuple7 (Tensor s1 d1) (Tensor s2 d2) (Tensor s3 d3) (Tensor s4 d4) (Tensor s5 d5) (Tensor s6 d6) (Tensor s7 d7)
+    deriving (Eq, Show)
+
+-- | Eight heterogeneous tensors.
+data Tuple8 (s1 :: Shape) (d1 :: DType) (s2 :: Shape) (d2 :: DType) (s3 :: Shape) (d3 :: DType) (s4 :: Shape) (d4 :: DType) (s5 :: Shape) (d5 :: DType) (s6 :: Shape) (d6 :: DType) (s7 :: Shape) (d7 :: DType) (s8 :: Shape) (d8 :: DType)
+    = Tuple8 (Tensor s1 d1) (Tensor s2 d2) (Tensor s3 d3) (Tensor s4 d4) (Tensor s5 d5) (Tensor s6 d6) (Tensor s7 d7) (Tensor s8 d8)
     deriving (Eq, Show)
 
 -- | A heterogeneous tuple of tensors for multi-result functions.
@@ -109,6 +151,93 @@ runBuilder2 name args' builderAction =
         ops = reverse $ bsOps finalState
     in Function name args' [rt1, rt2] [v1, v2] ops
 
+runBuilder3 :: forall s1 d1 s2 d2 s3 d3. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3)
+            => Text -> [FuncArg] -> Builder (Tuple3 s1 d1 s2 d2 s3 d3) -> Function
+runBuilder3 name args' builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0
+        (Tuple3 (Tensor v1) (Tensor v2) (Tensor v3), finalState) = runState m initState
+        rt1 = tensorType (Proxy @s1) (Proxy @d1)
+        rt2 = tensorType (Proxy @s2) (Proxy @d2)
+        rt3 = tensorType (Proxy @s3) (Proxy @d3)
+        ops = reverse $ bsOps finalState
+    in Function name args' [rt1, rt2, rt3] [v1, v2, v3] ops
+
+runBuilder4 :: forall s1 d1 s2 d2 s3 d3 s4 d4. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4)
+            => Text -> [FuncArg] -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4) -> Function
+runBuilder4 name args' builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0
+        (Tuple4 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4), finalState) = runState m initState
+        rt1 = tensorType (Proxy @s1) (Proxy @d1)
+        rt2 = tensorType (Proxy @s2) (Proxy @d2)
+        rt3 = tensorType (Proxy @s3) (Proxy @d3)
+        rt4 = tensorType (Proxy @s4) (Proxy @d4)
+        ops = reverse $ bsOps finalState
+    in Function name args' [rt1, rt2, rt3, rt4] [v1, v2, v3, v4] ops
+
+runBuilder5 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5)
+            => Text -> [FuncArg] -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5) -> Function
+runBuilder5 name args' builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0
+        (Tuple5 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4) (Tensor v5), finalState) = runState m initState
+        rt1 = tensorType (Proxy @s1) (Proxy @d1)
+        rt2 = tensorType (Proxy @s2) (Proxy @d2)
+        rt3 = tensorType (Proxy @s3) (Proxy @d3)
+        rt4 = tensorType (Proxy @s4) (Proxy @d4)
+        rt5 = tensorType (Proxy @s5) (Proxy @d5)
+        ops = reverse $ bsOps finalState
+    in Function name args' [rt1, rt2, rt3, rt4, rt5] [v1, v2, v3, v4, v5] ops
+
+runBuilder6 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6)
+            => Text -> [FuncArg] -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6) -> Function
+runBuilder6 name args' builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0
+        (Tuple6 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4) (Tensor v5) (Tensor v6), finalState) = runState m initState
+        rt1 = tensorType (Proxy @s1) (Proxy @d1)
+        rt2 = tensorType (Proxy @s2) (Proxy @d2)
+        rt3 = tensorType (Proxy @s3) (Proxy @d3)
+        rt4 = tensorType (Proxy @s4) (Proxy @d4)
+        rt5 = tensorType (Proxy @s5) (Proxy @d5)
+        rt6 = tensorType (Proxy @s6) (Proxy @d6)
+        ops = reverse $ bsOps finalState
+    in Function name args' [rt1, rt2, rt3, rt4, rt5, rt6] [v1, v2, v3, v4, v5, v6] ops
+
+runBuilder7 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7)
+            => Text -> [FuncArg] -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7) -> Function
+runBuilder7 name args' builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0
+        (Tuple7 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4) (Tensor v5) (Tensor v6) (Tensor v7), finalState) = runState m initState
+        rt1 = tensorType (Proxy @s1) (Proxy @d1)
+        rt2 = tensorType (Proxy @s2) (Proxy @d2)
+        rt3 = tensorType (Proxy @s3) (Proxy @d3)
+        rt4 = tensorType (Proxy @s4) (Proxy @d4)
+        rt5 = tensorType (Proxy @s5) (Proxy @d5)
+        rt6 = tensorType (Proxy @s6) (Proxy @d6)
+        rt7 = tensorType (Proxy @s7) (Proxy @d7)
+        ops = reverse $ bsOps finalState
+    in Function name args' [rt1, rt2, rt3, rt4, rt5, rt6, rt7] [v1, v2, v3, v4, v5, v6, v7] ops
+
+runBuilder8 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7, KnownShape s8, KnownDType d8)
+            => Text -> [FuncArg] -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8) -> Function
+runBuilder8 name args' builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0
+        (Tuple8 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4) (Tensor v5) (Tensor v6) (Tensor v7) (Tensor v8), finalState) = runState m initState
+        rt1 = tensorType (Proxy @s1) (Proxy @d1)
+        rt2 = tensorType (Proxy @s2) (Proxy @d2)
+        rt3 = tensorType (Proxy @s3) (Proxy @d3)
+        rt4 = tensorType (Proxy @s4) (Proxy @d4)
+        rt5 = tensorType (Proxy @s5) (Proxy @d5)
+        rt6 = tensorType (Proxy @s6) (Proxy @d6)
+        rt7 = tensorType (Proxy @s7) (Proxy @d7)
+        rt8 = tensorType (Proxy @s8) (Proxy @d8)
+        ops = reverse $ bsOps finalState
+    in Function name args' [rt1, rt2, rt3, rt4, rt5, rt6, rt7, rt8] [v1, v2, v3, v4, v5, v6, v7, v8] ops
+
 -- | Create a top-level 'Module' from a single-result function produced by a builder.
 -- Argument names are automatically set to @arg0@, @arg1@, etc. so that
 -- the signature and body SSA references line up.
@@ -123,6 +252,42 @@ moduleFromBuilder2 :: forall s1 d1 s2 d2. (KnownShape s1, KnownDType d1, KnownSh
 moduleFromBuilder2 name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
     in Module [runBuilder2 name renamed action]
+
+moduleFromBuilder3 :: forall s1 d1 s2 d2 s3 d3. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3)
+                   => Text -> [FuncArg] -> Builder (Tuple3 s1 d1 s2 d2 s3 d3) -> Module
+moduleFromBuilder3 name args' action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+    in Module [runBuilder3 name renamed action]
+
+moduleFromBuilder4 :: forall s1 d1 s2 d2 s3 d3 s4 d4. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4)
+                   => Text -> [FuncArg] -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4) -> Module
+moduleFromBuilder4 name args' action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+    in Module [runBuilder4 name renamed action]
+
+moduleFromBuilder5 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5)
+                   => Text -> [FuncArg] -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5) -> Module
+moduleFromBuilder5 name args' action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+    in Module [runBuilder5 name renamed action]
+
+moduleFromBuilder6 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6)
+                   => Text -> [FuncArg] -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6) -> Module
+moduleFromBuilder6 name args' action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+    in Module [runBuilder6 name renamed action]
+
+moduleFromBuilder7 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7)
+                   => Text -> [FuncArg] -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7) -> Module
+moduleFromBuilder7 name args' action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+    in Module [runBuilder7 name renamed action]
+
+moduleFromBuilder8 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7, KnownShape s8, KnownDType d8)
+                   => Text -> [FuncArg] -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8) -> Module
+moduleFromBuilder8 name args' action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+    in Module [runBuilder8 name renamed action]
 
 -- | Run a 'Builder' action and produce a multi-result 'Function' from a 'Tuple'.
 runBuilderT :: forall ss ds. TupleBuilder (Tuple ss ds) => Text -> [FuncArg] -> Builder (Tuple ss ds) -> Function
