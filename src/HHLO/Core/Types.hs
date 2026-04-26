@@ -16,9 +16,11 @@ module HHLO.Core.Types
 
 import GHC.TypeLits
 import Data.Proxy
+import Data.Kind (Type)
 import Data.Int (Int8, Int16, Int32, Int64)
+import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Text (Text)
-import qualified Data.Text as T
+
 
 -- | Supported element types for tensors.
 data DType
@@ -63,11 +65,17 @@ dtypeToText (Complex F64) = "complex<f64>"
 dtypeToText dt      = error $ "Unsupported dtype: " ++ show dt
 
 -- | Mapping from 'DType' to the corresponding Haskell host type.
-type family HostType (d :: DType) :: * where
+-- 'Bool' maps to 'Word8' because PJRT's PRED buffer type transfers
+-- as single-byte boolean values.
+type family HostType (d :: DType) :: Type where
     HostType 'F32  = Float
     HostType 'F64  = Double
-    HostType 'I32  = Int32
-    HostType 'I64  = Int64
     HostType 'I8   = Int8
     HostType 'I16  = Int16
-    HostType 'Bool = Bool
+    HostType 'I32  = Int32
+    HostType 'I64  = Int64
+    HostType 'UI8  = Word8
+    HostType 'UI16 = Word16
+    HostType 'UI32 = Word32
+    HostType 'UI64 = Word64
+    HostType 'Bool = Word8

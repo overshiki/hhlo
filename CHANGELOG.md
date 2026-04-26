@@ -46,3 +46,23 @@ Any code using `opResult` / `opResultType` or pattern-matching on the
 * Fixed `compare` to return shape-preserving `Tensor s 'Bool` per StableHLO spec.
 * New comparison wrappers: `equal`, `notEqual`, `greaterThan`, `lessThanOrEqual`, `greaterThanOrEqual`.
 * Test count: 141 CPU tests + 6 GPU integration tests.
+
+## 0.4.0.0 -- 2026-04-20
+
+**BREAKING**: `HostType 'Bool` changed from `Bool` to `Word8` to match
+PJRT's PRED buffer transfer semantics.
+
+* **Convenience layer** — two new modules that eliminate boilerplate for
+the common compile-and-run workflow:
+  * `HHLO.ModuleBuilder` provides `buildModule @nIn @nOut`, a polymorphic
+    entry point (via `TypeApplications`) that auto-generates `FuncArg`
+    declarations and wires up `arg` calls. No more `natVal` or `FuncArg`
+    boilerplate.
+  * `HHLO.Session` provides `withCPU`, `withGPU`, `withGPUDevice`, `compile`,
+    `run`, `runAsync`, and typed `HostTensor` host-device transfers.
+    No more manual `render`, `toDeviceF32`, `fromDeviceF32`, or shape lists.
+* `whileLoop3`–`whileLoop8` and `conditional3`–`conditional8` for carrying
+  3–8 heterogeneous tensors through control flow.
+* Boolean logic ops: `logicalAnd`, `logicalOr`, `logicalNot`.
+* New dependency: `directory` (for plugin-path discovery in `withCPU`/`withGPU`).
+* Test count: 155 CPU tests + 6 GPU integration tests.

@@ -1,0 +1,80 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+module Test.Runtime.EndToEndSession (tests) where
+
+import Prelude hiding (compare)
+import qualified Data.Vector.Storable as V
+import Test.Tasty
+import Test.Tasty.HUnit
+
+import HHLO.Core.Types
+import HHLO.EDSL.Ops
+import HHLO.IR.Builder (Tensor)
+import HHLO.ModuleBuilder
+import HHLO.Session
+import HHLO.IR.AST (Module)
+
+-- | A simple module: x + 1
+addOneModule :: Module
+addOneModule = buildModule @1 @1 "add_one" $ \x -> do
+    one <- constant @'[2] @'F32 1.0
+    add x one
+
+-- | A module with two inputs: x * y
+mulModule :: Module
+mulModule = buildModule @2 @1 "mul" $ \(x :: Tensor '[2] F32) (y :: Tensor '[2] F32) -> do
+    multiply x y
+
+-- | A module with two outputs
+splitModule :: Module
+splitModule = buildModule @1 @2 "split" $ \(x :: Tensor '[2] F32) -> do
+    y <- add x x
+    z <- multiply x x
+    returnTuple2 y z
+
+tests :: TestTree
+tests = testGroup "EndToEnd.Session"
+    [ testCase "run single-input module" $ withCPU $ \sess -> do
+        compiled <- compile sess addOneModule
+        (result :: HostTensor '[2] 'F32) <- run sess compiled (hostFromList @'[2] @'F32 [1.0, 2.0])
+        let vec = hostToVector result
+        vec @?= V.fromList [2.0, 3.0]
+
+    , testCase "run two-input module" $ withCPU $ \sess -> do
+        compiled <- compile sess mulModule
+        (result :: HostTensor '[2] 'F32) <- run sess compiled
+            ( hostFromList @'[2] @'F32 [2.0, 3.0]
+            , hostFromList @'[2] @'F32 [4.0, 5.0]
+            )
+        let vec = hostToVector result
+        vec @?= V.fromList [8.0, 15.0]
+
+    , testCase "run two-output module" $ withCPU $ \sess -> do
+        compiled <- compile sess splitModule
+        ((r1 :: HostTensor '[2] 'F32), (r2 :: HostTensor '[2] 'F32)) <-
+            run sess compiled (hostFromList @'[2] @'F32 [2.0, 3.0])
+        hostToVector r1 @?= V.fromList [4.0, 6.0]
+        hostToVector r2 @?= V.fromList [4.0, 9.0]
+
+    , testCase "runAsync is equivalent to run" $ withCPU $ \sess -> do
+        compiled <- compile sess addOneModule
+        (result :: HostTensor '[2] 'F32) <- runAsync sess compiled (hostFromList @'[2] @'F32 [5.0, 6.0])
+        awaitOutputs sess result
+        let vec = hostToVector result
+        vec @?= V.fromList [6.0, 7.0]
+
+    , testCase "hostFromVectorSafe accepts correct length" $ do
+        let result = hostFromVectorSafe @'[2,2] @'F32 (V.fromList [1.0, 2.0, 3.0, 4.0])
+        case result of
+            Right _ -> return ()
+            Left err -> assertFailure $ "unexpected failure: " ++ err
+
+    , testCase "hostFromVectorSafe rejects wrong length" $ do
+        let result = hostFromVectorSafe @'[2,2] @'F32 (V.fromList [1.0, 2.0])
+        case result of
+            Left _ -> return ()
+            Right _ -> assertFailure "expected failure for wrong length"
+    ]

@@ -8,10 +8,12 @@ Instead of replicating JAX's Python-based tracing infrastructure, HHLO generates
 
 ## Design
 
-HHLO is structured in four layers:
+HHLO is structured in five layers:
 
 ```
 ┌─────────────────────────────────────┐
+│  Convenience (HHLO.Session)         │  One-liners: withCPU, compile, run
+├─────────────────────────────────────┤
 │  EDSL (HHLO.EDSL.Ops)               │  Type-safe frontend: add, matmul, relu, etc.
 ├─────────────────────────────────────┤
 │  IR Builder (HHLO.IR.Builder)       │  Stateful monad for constructing MLIR
@@ -78,6 +80,25 @@ The AST `Operation` type supports multiple results, enabling ops like `stablehlo
 (newState, output) <- rngBitGenerator state
 ```
 
+**Convenience Layer**
+
+`HHLO.ModuleBuilder` and `HHLO.Session` provide a high-level API that eliminates PJRT boilerplate for the common case:
+
+```haskell
+import HHLO.ModuleBuilder
+import HHLO.Session
+
+-- Build + compile + run in four lines
+main = withCPU $ \sess -> do
+    let modu = buildModule @2 @1 "mul" $ \x y -> multiply x y
+    compiled <- compile sess modu
+    result <- run sess compiled (hostFromList @'[2] [2.0, 3.0],
+                                  hostFromList @'[2] [4.0, 5.0])
+    print (hostToList result)   -- [8.0, 15.0]
+```
+
+No `FuncArg`, no `natVal`, no `render`, no `toDeviceF32`, no explicit shape lists. The low-level API remains available for expert users who need full control.
+
 **Multi-Value Control Flow**
 
 `whileLoop2` / `conditional2` carry multiple typed tensors through loops and conditionals without manual packing:
@@ -143,6 +164,20 @@ packed <- pack2 a b    -- pack two scalars into [2]
 - `curl`, `tar`, and standard C toolchain (`gcc` or `clang`)
 - `libstdc++` and `libdl` (usually present on Linux)
 
+### From Hackage
+
+HHLO is published on [Hackage](https://hackage.haskell.org/package/hhlo). You can add it directly to your `.cabal` file:
+
+```cabal
+build-depends: hhlo >= 0.4
+```
+
+Or with `cabal`:
+
+```bash
+cabal install hhlo
+```
+
 ### Download PJRT Plugins
 
 Run the provided script to download prebuilt PJRT plugins:
@@ -196,6 +231,29 @@ cabal run example-multi-gpu-inference --flag=examples
 ---
 
 ## EDSL Quick Start
+
+### Convenience layer (recommended)
+
+```haskell
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeApplications #-}
+
+import HHLO.ModuleBuilder
+import HHLO.Session
+
+-- Build a program: c = a + b
+program = buildModule @2 @1 "add" $ \a b -> add a b
+
+main = withCPU $ \sess -> do
+    compiled <- compile sess program
+    result <- run sess compiled
+        ( hostFromList @'[2,2] @'F32 [1, 2, 3, 4]
+        , hostFromList @'[2,2] @'F32 [5, 6, 7, 8]
+        )
+    print (hostToList result)   -- [6.0, 8.0, 10.0, 12.0]
+```
+
+### Low-level API (full control)
 
 ```haskell
 {-# LANGUAGE DataKinds #-}
@@ -301,7 +359,7 @@ Standalone examples are provided in `examples/`:
 cabal test
 ```
 
-Runs **141 tests** across three tiers:
+Runs **155 tests** across three tiers:
 
 - **Tier 1 — Golden tests** — Verify rendered MLIR text for EDSL ops, IR constructs, NN layers, and control flow.
 - **Tier 2 — End-to-end runtime tests** — Load the PJRT CPU plugin, compile StableHLO programs, execute them, and verify numerical results. Covers arithmetic, matmul, reductions, data movement, and NN ops.
@@ -313,7 +371,7 @@ Runs **141 tests** across three tiers:
 HHLO_TEST_GPU=1 cabal test
 ```
 
-Runs the full 141 CPU tests **plus** 6 additional GPU integration tests:
+Runs the full 155 CPU tests **plus** 6 additional GPU integration tests:
 
 - `EndToEnd.GPU` — GPU availability and device enumeration
 - `Runtime.BufferGPU` — Buffer round-trip and metadata queries on GPU

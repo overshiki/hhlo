@@ -1,6 +1,6 @@
 cabal-version:      3.0
 name:               hhlo
-version:            0.3.0.0
+version:            0.4.0.0
 synopsis:           Haskell Frontend for StableHLO — type-safe ML inference on CPU and GPU
 description:
     HHLO is a Haskell library and runtime for building, compiling, and executing
@@ -61,6 +61,8 @@ library
         HHLO.IR.Builder
         HHLO.IR.Pretty
         HHLO.EDSL.Ops
+        HHLO.ModuleBuilder
+        HHLO.Session
         HHLO.Runtime.PJRT.FFI
         HHLO.Runtime.PJRT.Types
         HHLO.Runtime.PJRT.Error
@@ -78,7 +80,8 @@ library
         containers    >= 0.6   && < 0.8,
         transformers  >= 0.6   && < 0.7,
         mtl           >= 2.3   && < 2.4,
-        async         >= 2.2   && < 2.3
+        async         >= 2.2   && < 2.3,
+        directory     >= 1.3   && < 1.4
     hs-source-dirs:   src
     default-language: GHC2021
     include-dirs:     cbits
@@ -483,6 +486,7 @@ test-suite hhlo-test
         Test.IR.Pretty
         Test.IR.Builder
         Test.EDSL.Ops
+        Test.ModuleBuilder
         Test.Runtime.EndToEnd
         Test.Runtime.EndToEndArithmetic
         Test.Runtime.EndToEndShape
@@ -491,6 +495,7 @@ test-suite hhlo-test
         Test.Runtime.EndToEndReductions
         Test.Runtime.EndToEndDataMovement
         Test.Runtime.EndToEndMultiValue
+        Test.Runtime.EndToEndSession
         Test.Runtime.Buffer
         Test.Runtime.Async
         Test.Runtime.Errors
