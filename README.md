@@ -467,15 +467,15 @@ All 147 tests passed (16.27s)
 
 ---
 
-## Architecture Docs
+<!-- ## Architecture Docs -->
 
-The `doc/` directory contains detailed design documents:
+<!-- The `doc/` directory contains detailed design documents: -->
 
-| Document | Contents |
-|----------|----------|
-| `implementation-design.md` | Four-layer architecture and design decisions |
-| `progress-and-remaining-work.md` | Current status, completed features, and backlog |
-| `test-suite-documentation.md` | Test catalog and tier descriptions |
+<!-- | Document | Contents | -->
+<!-- |----------|----------| -->
+<!-- | `implementation-design.md` | Four-layer architecture and design decisions | -->
+<!-- | `progress-and-remaining-work.md` | Current status, completed features, and backlog | -->
+<!-- | `test-suite-documentation.md` | Test catalog and tier descriptions | -->
 
 ---
 
