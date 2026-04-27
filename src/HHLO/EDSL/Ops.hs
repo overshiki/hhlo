@@ -11,6 +11,7 @@ module HHLO.EDSL.Ops
     , divide
     , matmul
     , dotGeneral
+    , einsum
     , linear
     , linearBatched
     -- * Unary element-wise ops
@@ -40,9 +41,13 @@ module HHLO.EDSL.Ops
     , concatenate
     , concatenate2
     , iota
+    , split
+    , stack
     -- * Reductions
     , reduceSum
     , reduceSumDim
+    , productAll
+    , productDim
     , reduceWindow
     , maxPool
     , avgPool
@@ -94,6 +99,7 @@ module HHLO.EDSL.Ops
     , dynamicSlice
     , sort
     , convert
+    , topK
     -- * Selection
     , select
     -- * Map
@@ -131,7 +137,10 @@ module HHLO.EDSL.Ops
 
 import Prelude hiding (subtract, negate, maximum, minimum, abs, compare, map, tanh, sqrt, sin, cos, tan, floor, ceiling)
 
+import Control.Monad (when)
 import Data.Int (Int64)
+import Data.List (elemIndex)
+import Data.Maybe (fromJust)
 import Data.Proxy
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -1879,3 +1888,200 @@ pack3 x y z = do
     y1 <- reshape @'[] @'[1] y
     z1 <- reshape @'[] @'[1] z
     concatenate @'[1] @'[3] @d 0 [x1, y1, z1]
+
+-- ---------------------------------------------------------------------------
+-- Product reductions
+-- ---------------------------------------------------------------------------
+
+-- | Product of all elements (reduce over all dimensions).
+productAll :: forall s d. (KnownShape s, KnownDType d) => Tensor s d -> Builder (Tensor '[] d)
+productAll (Tensor x) = do
+    let dims = [0 .. fromIntegral (length (shapeVal (Proxy @s))) - 1]
+    productDim @s @'[] dims (Tensor x)
+
+-- | Product elements over specific dimensions.
+productDim :: forall sFrom sTo d.
+              (KnownShape sFrom, KnownShape sTo, KnownDType d)
+           => [Int] -> Tensor sFrom d -> Builder (Tensor sTo d)
+productDim dims (Tensor x) = do
+    let inType   = tensorType (Proxy @sFrom) (Proxy @d)
+        outType  = tensorType (Proxy @sTo)   (Proxy @d)
+        elemType = tensorType (Proxy @'[])   (Proxy @d)
+    -- Init value for stablehlo.reduce (must be scalar)
+    oneVid <- emitOp "stablehlo.constant" [] []
+        [AttrDenseElements [] (dtypeVal (Proxy @d)) [1.0]] elemType
+    -- Build reduction region: two scalar args, apply stablehlo.multiply
+    redBlock <- runBlockBuilder [elemType, elemType] $ do
+        a <- arg @'[] @d
+        b <- arg @'[] @d
+        prodVid <- emitOp "stablehlo.multiply"
+                    [tensorValue a, tensorValue b]
+                    [elemType, elemType] [] elemType
+        emitReturn [prodVid] [elemType]
+    vid <- emitOpRegions "stablehlo.reduce"
+            [x, oneVid]
+            [inType, elemType]
+            [AttrRaw $ "dimensions = array<i64: " <> T.intercalate ", " [T.pack (show d) | d <- dims] <> ">"]
+            [Region [redBlock]]
+            outType
+    return (Tensor vid)
+
+-- ---------------------------------------------------------------------------
+-- Split and stack
+-- ---------------------------------------------------------------------------
+
+-- | Split a tensor into @n@ equal parts along dimension @dim@.
+-- The size of @dim@ in the input must be evenly divisible by @n@.
+split :: forall sIn sOut d.
+         (KnownShape sIn, KnownShape sOut, KnownDType d)
+      => Int64            -- ^ dimension to split along
+      -> Int64            -- ^ number of equal splits
+      -> Tensor sIn d
+      -> Builder [Tensor sOut d]
+split dim n t = do
+    let sInShape = shapeVal (Proxy @sIn)
+        rank = length sInShape
+        dimSize = fromIntegral (sInShape !! fromIntegral dim) :: Int
+        chunkSize = dimSize `div` fromIntegral n
+        stride = replicate rank 1
+    when (dimSize `mod` fromIntegral n /= 0) $
+        error "split: dimension size not evenly divisible by number of splits"
+    Prelude.mapM (\i -> do
+        let start = [if j == fromIntegral dim then fromIntegral (i * chunkSize) else 0 | j <- [0..rank-1]]
+            limit = [if j == fromIntegral dim then fromIntegral ((i+1) * chunkSize) else fromIntegral (sInShape !! j) | j <- [0..rank-1]]
+        slice @sIn @sOut @d t start limit stride
+        ) [0 .. fromIntegral n - 1]
+
+-- | Stack a list of tensors along a new axis.
+-- All inputs must have the same shape. The new axis is inserted at position
+-- @dim@ in the output shape.
+stack :: forall sIn sOut d.
+         (KnownShape sIn, KnownShape sOut, KnownDType d)
+      => Int64            -- ^ axis to insert and stack along
+      -> [Tensor sIn d]   -- ^ tensors to stack (must be non-empty)
+      -> Builder (Tensor sOut d)
+stack dim inputs = do
+    let n = length inputs
+        inShape  = fmap fromIntegral (shapeVal (Proxy @sIn)) :: [Int64]
+        outShape = fmap fromIntegral (shapeVal (Proxy @sOut)) :: [Int64]
+        dt = dtypeVal (Proxy @d)
+        rank = length inShape
+        expectedOutShape = take (fromIntegral dim) inShape ++ [fromIntegral n] ++ drop (fromIntegral dim) inShape
+        reshapedShape = take (fromIntegral dim) inShape ++ [1] ++ drop (fromIntegral dim) inShape
+        inType = tensorType (Proxy @sIn) (Proxy @d)
+        outType = tensorType (Proxy @sOut) (Proxy @d)
+        reshapedType = TensorType (fmap fromIntegral reshapedShape) dt
+    when (n == 0) $ error "stack: empty input list"
+    when (outShape /= expectedOutShape) $
+        error $ "stack: output shape mismatch. Expected " ++ show expectedOutShape ++ ", got " ++ show outShape
+    reshapedVids <- Prelude.mapM (\(Tensor vid) ->
+        emitOp "stablehlo.reshape" [vid] [inType] [] reshapedType
+        ) inputs
+    let dimAttr = AttrInt "dimension" (fromIntegral dim)
+    vid <- emitOp "stablehlo.concatenate" reshapedVids (replicate n reshapedType) [dimAttr] outType
+    return (Tensor vid)
+
+-- ---------------------------------------------------------------------------
+-- Top-K
+-- ---------------------------------------------------------------------------
+
+-- | Return the top-K values along a dimension, in descending order.
+--
+-- Note: A @topKWithIndices@ variant is future work; it requires multi-operand
+-- sort support (sorting values and their index tensors together).
+topK :: forall s sOut d.
+        (KnownShape s, KnownShape sOut, KnownDType d)
+     => Int64            -- ^ K
+     -> Int64            -- ^ dimension to sort along
+     -> Tensor s d
+     -> Builder (Tensor sOut d)
+topK k dim t = do
+    let sShape = fmap fromIntegral (shapeVal (Proxy @s)) :: [Int64]
+        outShape = fmap fromIntegral (shapeVal (Proxy @sOut)) :: [Int64]
+        rank = length sShape
+        expectedOutShape = [if j == fromIntegral dim then fromIntegral k else sShape !! j | j <- [0..rank-1]]
+    when (outShape /= expectedOutShape) $
+        error $ "topK: output shape mismatch. Expected " ++ show expectedOutShape ++ ", got " ++ show outShape
+    -- Sort descending
+    sorted <- sort @s @d t dim False $ \a b -> greaterThan a b
+    -- Slice the first K elements along dim
+    let start = replicate rank 0
+        limit = [if j == fromIntegral dim then fromIntegral k else sShape !! j | j <- [0..rank-1]]
+        stride = replicate rank 1
+    slice @s @sOut @d sorted start limit stride
+
+-- ---------------------------------------------------------------------------
+-- Einsum
+-- ---------------------------------------------------------------------------
+
+-- | Einstein summation for two tensors.
+--
+-- Example: @einsum "ijk,jkl->il" a b@ contracts the @j@ and @k@ dimensions,
+-- leaving @i@ from the left operand and @l@ from the right.
+--
+-- The caller must supply the output shape @sOut@ via type application or
+-- inference context. Runtime validation ensures the subscript string agrees
+-- with the type-level shapes.
+einsum :: forall s1 s2 sOut d.
+          (KnownShape s1, KnownShape s2, KnownShape sOut, KnownDType d)
+       => String              -- ^ subscript string, e.g. "ijk,jkl->il"
+       -> Tensor s1 d
+       -> Tensor s2 d
+       -> Builder (Tensor sOut d)
+einsum spec (Tensor x) (Tensor y) = do
+    let (left, right, out) = parseEinsum spec
+        s1Shape = shapeVal (Proxy @s1)
+        s2Shape = shapeVal (Proxy @s2)
+        sOutShape = shapeVal (Proxy @sOut)
+        dt = dtypeVal (Proxy @d)
+        rank1 = length s1Shape
+        rank2 = length s2Shape
+        rankOut = length sOutShape
+    when (length left /= rank1) $ error "einsum: left subscript rank mismatch"
+    when (length right /= rank2) $ error "einsum: right subscript rank mismatch"
+    when (length out /= rankOut) $ error "einsum: output subscript rank mismatch"
+    let batchLabels     = [c | c <- left, c `elem` right, c `elem` out]
+        contractLabels  = [c | c <- left, c `elem` right, c `notElem` out]
+        leftFree        = [c | c <- left, c `elem` out, c `notElem` right]
+        rightFree       = [c | c <- right, c `elem` out, c `notElem` left]
+        natural         = batchLabels ++ leftFree ++ rightFree
+        lhsBatch        = fmap (fromIntegral . fromJust . (`elemIndex` left)) batchLabels
+        rhsBatch        = fmap (fromIntegral . fromJust . (`elemIndex` right)) batchLabels
+        lhsContract     = fmap (fromIntegral . fromJust . (`elemIndex` left)) contractLabels
+        rhsContract     = fmap (fromIntegral . fromJust . (`elemIndex` right)) contractLabels
+        -- Build natural shape from actual dimensions
+        lookupDim label
+            | label `elem` left  = s1Shape !! fromJust (label `elemIndex` left)
+            | otherwise          = s2Shape !! fromJust (label `elemIndex` right)
+        naturalShape    = fmap (fromIntegral . lookupDim) natural
+        naturalType     = TensorType (fmap fromIntegral naturalShape) dt
+        inType1         = tensorType (Proxy @s1) (Proxy @d)
+        inType2         = tensorType (Proxy @s2) (Proxy @d)
+        outType         = tensorType (Proxy @sOut) (Proxy @d)
+        batchAttr       = AttrString "batching_dims"
+                            ("[" <> T.intercalate ", " (fmap (T.pack . show) lhsBatch) <> "] x ["
+                               <> T.intercalate ", " (fmap (T.pack . show) rhsBatch) <> "]")
+        contractingAttr = AttrString "contracting_dims"
+                            ("[" <> T.intercalate ", " (fmap (T.pack . show) lhsContract) <> "] x ["
+                               <> T.intercalate ", " (fmap (T.pack . show) rhsContract) <> "]")
+        -- Validate output shape
+        expectedOutShape = fmap (fromIntegral . lookupDim) out
+    when (fmap fromIntegral sOutShape /= expectedOutShape) $
+        error $ "einsum: output shape mismatch. Expected " ++ show expectedOutShape ++ ", got " ++ show (fmap fromIntegral sOutShape)
+    vid <- emitOp "stablehlo.dot_general" [x, y] [inType1, inType2]
+            [batchAttr, contractingAttr] naturalType
+    if natural == out
+    then return (Tensor vid)
+    else do
+        let perm = fmap (fromIntegral . fromJust . (`elemIndex` natural)) out
+            permAttr = AttrIntList "permutation" perm
+        vidT <- emitOp "stablehlo.transpose" [vid] [naturalType] [permAttr] outType
+        return (Tensor vidT)
+  where
+    parseEinsum s =
+        case break (== '-') s of
+            (lhsRhs, '-':'>':outRest) ->
+                case break (== ',') lhsRhs of
+                    (left, ',':right) -> (left, right, outRest)
+                    _ -> error "einsum: expected two operands separated by comma"
+            _ -> error "einsum: expected -> in subscript string"

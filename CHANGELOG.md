@@ -47,7 +47,7 @@ Any code using `opResult` / `opResultType` or pattern-matching on the
 * New comparison wrappers: `equal`, `notEqual`, `greaterThan`, `lessThanOrEqual`, `greaterThanOrEqual`.
 * Test count: 141 CPU tests + 6 GPU integration tests.
 
-## 0.4.0.0 -- 2026-04-20
+## 0.4.0.0 -- 2026-04-26
 
 **BREAKING**: `HostType 'Bool` changed from `Bool` to `Word8` to match
 PJRT's PRED buffer transfer semantics.
@@ -66,3 +66,18 @@ the common compile-and-run workflow:
 * Boolean logic ops: `logicalAnd`, `logicalOr`, `logicalNot`.
 * New dependency: `directory` (for plugin-path discovery in `withCPU`/`withGPU`).
 * Test count: 155 CPU tests + 6 GPU integration tests.
+
+
+## Next -- 2026-04-27
+
+* New convenience ops:
+  * `einsum` — Einstein summation via subscript strings (e.g. `"ij,jk->ik"`).
+    Parses labels, computes batch/contracting dims, and emits the correct
+    `stablehlo.dot_general` + optional `stablehlo.transpose`.
+  * `split` — split a tensor into N equal parts along a dimension.
+  * `stack` — stack N tensors along a new axis.
+  * `productAll`, `productDim` — product reductions (mirrors `sumAll`/`reduceSumDim`).
+  * `topK` — return top-K values along a dimension via `sort` + `slice`.
+* Bug fix: `stablehlo.sort` now wraps its region in parentheses for PJRT
+  v1.16.0 parser compatibility.
+* Test count: 169 CPU tests + 6 GPU integration tests.

@@ -610,5 +610,76 @@ tests = testGroup "EDSL.Ops"
                     [ FuncArg "arg0" (TensorType [3] F32) ]
                     $ do x <- arg @'[3] @'F32; y <- slice1 x 1; return y
             assertBool "stablehlo.slice" $ "stablehlo.slice" `T.isInfixOf` render modu
+        , testCase "productAll" $ do
+            let modu = moduleFromBuilder @'[] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                    $ do x <- arg @'[2, 3] @'F32; y <- productAll x; return y
+            let rendered = render modu
+            assertBool "stablehlo.reduce" $ "stablehlo.reduce" `T.isInfixOf` rendered
+            assertBool "stablehlo.multiply" $ "stablehlo.multiply" `T.isInfixOf` rendered
+        , testCase "productDim" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                    $ do x <- arg @'[2, 3] @'F32; y <- productDim @'[2, 3] @'[2] [1] x; return y
+            let rendered = render modu
+            assertBool "stablehlo.reduce" $ "stablehlo.reduce" `T.isInfixOf` rendered
+            assertBool "stablehlo.multiply" $ "stablehlo.multiply" `T.isInfixOf` rendered
+        , testCase "split" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [4] F32) ]
+                    $ do
+                        x <- arg @'[4] @'F32
+                        ys <- split @'[4] @'[2] 0 2 x
+                        case ys of
+                            (y1:_) -> return y1
+                            _ -> error "expected at least one split"
+            assertBool "stablehlo.slice" $ "stablehlo.slice" `T.isInfixOf` render modu
+        , testCase "stack" $ do
+            let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2] F32)
+                    , FuncArg "arg1" (TensorType [2] F32)
+                    ]
+                    $ do
+                        x <- arg @'[2] @'F32
+                        y <- arg @'[2] @'F32
+                        z <- stack @'[2] @'[2, 2] 0 [x, y]
+                        return z
+            let rendered = render modu
+            assertBool "stablehlo.reshape" $ "stablehlo.reshape" `T.isInfixOf` rendered
+            assertBool "stablehlo.concatenate" $ "stablehlo.concatenate" `T.isInfixOf` rendered
+        , testCase "topK" $ do
+            let modu = moduleFromBuilder @'[2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [4] F32) ]
+                    $ do
+                        x <- arg @'[4] @'F32
+                        y <- topK @'[4] @'[2] 2 0 x
+                        return y
+            let rendered = render modu
+            assertBool "stablehlo.sort" $ "stablehlo.sort" `T.isInfixOf` rendered
+            assertBool "stablehlo.slice" $ "stablehlo.slice" `T.isInfixOf` rendered
+        , testCase "einsum matmul" $ do
+            let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2, 3] F32)
+                    , FuncArg "arg1" (TensorType [3, 2] F32)
+                    ]
+                    $ do
+                        x <- arg @'[2, 3] @'F32
+                        y <- arg @'[3, 2] @'F32
+                        z <- einsum "ij,jk->ik" x y
+                        return z
+            assertBool "stablehlo.dot_general" $ "stablehlo.dot_general" `T.isInfixOf` render modu
+        , testCase "einsum transpose output" $ do
+            let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2, 3] F32)
+                    , FuncArg "arg1" (TensorType [3, 2] F32)
+                    ]
+                    $ do
+                        x <- arg @'[2, 3] @'F32
+                        y <- arg @'[3, 2] @'F32
+                        z <- einsum "ij,jk->ki" x y
+                        return z
+            let rendered = render modu
+            assertBool "stablehlo.dot_general" $ "stablehlo.dot_general" `T.isInfixOf` rendered
+            assertBool "stablehlo.transpose" $ "stablehlo.transpose" `T.isInfixOf` rendered
         ]
     ]

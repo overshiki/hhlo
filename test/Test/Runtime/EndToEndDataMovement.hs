@@ -257,4 +257,18 @@ tests = testGroup "EndToEnd.DataMovement"
         [bufOut] <- execute api exec [bufA]
         result <- fromDevice api bufOut 3 :: IO (V.Vector Word8)
         result @?= V.fromList [0, 1, 0]
+    , testCase "topK" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[2] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [4] F32) ]
+                $ do
+                    x <- arg @'[4] @'F32
+                    y <- topK @'[4] @'[2] 2 0 x
+                    return y
+        exec <- compile api client (render modu)
+        let inp = V.fromList [3.0, 1.0, 4.0, 1.0]
+        bufIn <- toDeviceF32 api client inp [4]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 2
+        -- Descending sort: [4.0, 3.0, 1.0, 1.0], top 2: [4.0, 3.0]
+        result @?= V.fromList [4.0, 3.0]
     ]

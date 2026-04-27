@@ -66,4 +66,31 @@ tests = testGroup "EndToEnd.Reductions"
         let expected = V.fromList [3.5, 5.5, 11.5, 13.5]
         assertBool "avgPool close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "productAll" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                $ do
+                    x <- arg @'[2, 3] @'F32
+                    y <- productAll x
+                    return y
+        exec <- compile api client (render modu)
+        let inp = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        bufIn <- toDeviceF32 api client inp [2, 3]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 1
+        result @?= V.fromList [720.0]
+    , testCase "productDim" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[2] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                $ do
+                    x <- arg @'[2, 3] @'F32
+                    y <- productDim @'[2, 3] @'[2] [1] x
+                    return y
+        exec <- compile api client (render modu)
+        let inp = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        bufIn <- toDeviceF32 api client inp [2, 3]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 2
+        -- Row products: 1*2*3=6, 4*5*6=120
+        result @?= V.fromList [6.0, 120.0]
     ]

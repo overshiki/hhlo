@@ -96,4 +96,45 @@ tests = testGroup "EndToEnd.Matmul"
         let expected = V.fromList [3.0, 3.0, 7.5, 7.5]
         assertBool "dotGeneral close" $
             all (\(r, e) -> abs (r - e) < 0.01) (zip (V.toList result) (V.toList expected))
+    , testCase "einsum matmul" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [2, 3] F32)
+                , FuncArg "arg1" (TensorType [3, 2] F32)
+                ]
+                $ do
+                    x <- arg @'[2, 3] @'F32
+                    y <- arg @'[3, 2] @'F32
+                    z <- einsum "ij,jk->ik" x y
+                    return z
+        exec <- compile api client (render modu)
+        let a = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] :: V.Vector Float
+            b = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] :: V.Vector Float
+        bufA <- toDeviceF32 api client a [2, 3]
+        bufB <- toDeviceF32 api client b [3, 2]
+        [bufOut] <- execute api exec [bufA, bufB]
+        result <- fromDeviceF32 api bufOut 4
+        let expected = V.fromList [22.0, 28.0, 49.0, 64.0]
+        assertBool "einsum matmul close" $
+            all (\(r, e) -> abs (r - e) < 0.01) (zip (V.toList result) (V.toList expected))
+    , testCase "einsum transpose output" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [2, 3] F32)
+                , FuncArg "arg1" (TensorType [3, 2] F32)
+                ]
+                $ do
+                    x <- arg @'[2, 3] @'F32
+                    y <- arg @'[3, 2] @'F32
+                    z <- einsum "ij,jk->ki" x y
+                    return z
+        exec <- compile api client (render modu)
+        let a = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] :: V.Vector Float
+            b = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0] :: V.Vector Float
+        bufA <- toDeviceF32 api client a [2, 3]
+        bufB <- toDeviceF32 api client b [3, 2]
+        [bufOut] <- execute api exec [bufA, bufB]
+        result <- fromDeviceF32 api bufOut 4
+        -- Same as matmul but transposed: [[22,49],[28,64]] flattened row-major = [22,49,28,64]
+        let expected = V.fromList [22.0, 49.0, 28.0, 64.0]
+        assertBool "einsum transpose close" $
+            all (\(r, e) -> abs (r - e) < 0.01) (zip (V.toList result) (V.toList expected))
     ]

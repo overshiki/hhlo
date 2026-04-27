@@ -176,10 +176,10 @@ instance Pretty Operation where
         <> (if null attrs then mempty else " " <> prettyAttrs attrs)
         <> " : () -> " <> prettyResults resultTypes
     pretty (Operation "stablehlo.sort" operands operandTypes attrs regions results resultTypes) =
-        -- Generic form (has regions; fallback would already use generic, but explicit is clearer).
+        -- Generic form: regions must be wrapped in ( ) for PJRT parser compatibility.
         prettyResultVids results <> " = \"stablehlo.sort\"("
         <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
-        <> (if null regions then mempty else mconcat (map prettyRegion regions))
+        <> (if null regions then mempty else " (" <> mconcat (intersperse (", ") (map prettyRegion regions)) <> ")")
         <> (if null attrs then mempty else " " <> prettyAttrs attrs)
         <> " : " <> prettyResultType operandTypes resultTypes
     pretty (Operation "stablehlo.return" operands operandTypes _ regions _ _) =
