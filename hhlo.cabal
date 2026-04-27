@@ -63,6 +63,10 @@ library
         HHLO.EDSL.Ops
         HHLO.ModuleBuilder
         HHLO.Session
+        HHLO.Autograd
+        HHLO.Autograd.Core
+        HHLO.Autograd.Grad
+        HHLO.Autograd.Rules
         HHLO.Runtime.PJRT.FFI
         HHLO.Runtime.PJRT.Types
         HHLO.Runtime.PJRT.Error
@@ -487,6 +491,8 @@ test-suite hhlo-test
         Test.IR.Builder
         Test.EDSL.Ops
         Test.ModuleBuilder
+        Test.Autograd.Grad
+        Test.Autograd.Rules
         Test.Runtime.EndToEnd
         Test.Runtime.EndToEndArithmetic
         Test.Runtime.EndToEndShape
@@ -496,6 +502,7 @@ test-suite hhlo-test
         Test.Runtime.EndToEndDataMovement
         Test.Runtime.EndToEndMultiValue
         Test.Runtime.EndToEndSession
+        Test.Runtime.EndToEndAutograd
         Test.Runtime.Buffer
         Test.Runtime.Async
         Test.Runtime.Errors

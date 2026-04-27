@@ -68,8 +68,14 @@ the common compile-and-run workflow:
 * Test count: 155 CPU tests + 6 GPU integration tests.
 
 
-## Next -- 2026-04-27
+## 0.5.0.0 -- 2026-04-27
 
+* **Autograd** — reverse-mode automatic differentiation is now part of HHLO.
+  New module `HHLO.Autograd` provides `grad` and `vjp` combinators that
+  transform HHLO computation graphs into their gradients, producing new
+  StableHLO modules that compile via PJRT. VJP rules cover ~25 ops including
+  element-wise arithmetic, matmul, transpose, reshape, broadcast, reduce,
+  slice, pad, concatenate, select, and more.
 * New convenience ops:
   * `einsum` — Einstein summation via subscript strings (e.g. `"ij,jk->ik"`).
     Parses labels, computes batch/contracting dims, and emits the correct
@@ -80,4 +86,4 @@ the common compile-and-run workflow:
   * `topK` — return top-K values along a dimension via `sort` + `slice`.
 * Bug fix: `stablehlo.sort` now wraps its region in parentheses for PJRT
   v1.16.0 parser compatibility.
-* Test count: 169 CPU tests + 6 GPU integration tests.
+* Test count: 181 CPU tests + 6 GPU integration tests.
