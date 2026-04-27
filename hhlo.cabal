@@ -574,3 +574,42 @@ executable example-multi-value-loop
     default-language: GHC2021
     if !flag(examples)
         buildable: False
+
+executable example-autograd-basic
+    import:           warnings
+    main-is:          34-autograd-basic.hs
+    build-depends:
+        base          >= 4.18.2 && < 5,
+        hhlo,
+        vector        >= 0.13  && < 0.14,
+        text          >= 2.0   && < 2.2
+    hs-source-dirs:   examples
+    default-language: GHC2021
+    if !flag(examples)
+        buildable: False
+
+executable example-autograd-linear
+    import:           warnings
+    main-is:          35-autograd-linear.hs
+    build-depends:
+        base          >= 4.18.2 && < 5,
+        hhlo,
+        vector        >= 0.13  && < 0.14,
+        text          >= 2.0   && < 2.2
+    hs-source-dirs:   examples
+    default-language: GHC2021
+    if !flag(examples)
+        buildable: False
+
+executable example-autograd-composite
+    import:           warnings
+    main-is:          36-autograd-composite.hs
+    build-depends:
+        base          >= 4.18.2 && < 5,
+        hhlo,
+        vector        >= 0.13  && < 0.14,
+        text          >= 2.0   && < 2.2
+    hs-source-dirs:   examples
+    default-language: GHC2021
+    if !flag(examples)
+        buildable: False
