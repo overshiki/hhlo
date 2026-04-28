@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Test.Runtime.EndToEndAutograd where
 
@@ -8,8 +9,13 @@ import qualified Data.Vector.Storable as V
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import GHC.Generics (Generic)
+
 import HHLO.Core.Types
 import HHLO.EDSL.Ops
+import HHLO.IR.AST (FuncArg(..))
+import HHLO.IR.Builder (Builder, Tensor(..), arg, moduleFromBuilder, moduleFromBuilder3, tensorType)
+import Data.Proxy (Proxy(..))
 import HHLO.IR.Pretty
 import HHLO.Autograd
 import HHLO.Runtime.Compile
@@ -129,4 +135,67 @@ tests = testGroup "EndToEnd.Autograd"
         let expected = V.fromList [0,0,0,0, 0,1,0,1, 0,0,0,0, 0,1,0,1]
         assertBool "maxPool grad close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "grad2 multiply" $ withPJRTCPU $ \api client -> do
+        let f x y = do z <- multiply x y; sumAll z
+            modu = moduleFromBuilder @'[4] @'F32 "main"
+                [ FuncArg "arg0" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                , FuncArg "arg1" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                ] $ do
+                    x <- arg @'[2] @'F32
+                    y <- arg @'[2] @'F32
+                    (dx, dy) <- grad2 f x y
+                    concatenate 0 [dx, dy]
+        exec <- compile api client (render modu)
+        let inp1 = V.fromList [1.0, 2.0]
+            inp2 = V.fromList [3.0, 4.0]
+        bufIn1 <- toDeviceF32 api client inp1 [2]
+        bufIn2 <- toDeviceF32 api client inp2 [2]
+        [bufOut] <- execute api exec [bufIn1, bufIn2]
+        result <- fromDeviceF32 api bufOut 4
+        -- grad_x = y = [3, 4]
+        -- grad_y = x = [1, 2]
+        let expected = V.fromList [3.0, 4.0, 1.0, 2.0]
+        assertBool "grad2 close" $
+            V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "gradWithParams" $ withPJRTCPU $ \api client -> do
+        let loss :: MLPParams -> Tensor '[2] 'F32 -> Builder (Tensor '[] 'F32)
+            loss p x = do
+                y1 <- multiply x (w p)
+                y <- add y1 (b p)
+                sumAll y
+            modu = moduleFromBuilder @'[4] @'F32 "main"
+                [ FuncArg "arg0" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                , FuncArg "arg1" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                , FuncArg "arg2" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                ] $ do
+                    wIn <- arg @'[2] @'F32
+                    bIn <- arg @'[2] @'F32
+                    xIn <- arg @'[2] @'F32
+                    let params = MLPParams wIn bIn
+                    grads <- gradWithParams loss params xIn
+                    -- Pack gradients into a single flat tensor for return
+                    packed <- paramPack grads
+                    return (btoTyped @'[4] @'F32 packed)
+        exec <- compile api client (render modu)
+        let wVal = V.fromList [1.0, 2.0]
+            bVal = V.fromList [0.0, 0.0]
+            xVal = V.fromList [3.0, 4.0]
+        bufW <- toDeviceF32 api client wVal [2]
+        bufB <- toDeviceF32 api client bVal [2]
+        bufX <- toDeviceF32 api client xVal [2]
+        [bufOut] <- execute api exec [bufW, bufB, bufX]
+        result <- fromDeviceF32 api bufOut 4
+        -- y = x * w + b
+        -- dw = x = [3, 4]
+        -- db = [1, 1] (seed from sumAll)
+        let expected = V.fromList [3.0, 4.0, 1.0, 1.0]
+        assertBool "gradWithParams close" $
+            V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     ]
+
+data MLPParams = MLPParams
+    { w :: Tensor '[2] 'F32
+    , b :: Tensor '[2] 'F32
+    } deriving (Generic)
+
+instance ParamTree MLPParams

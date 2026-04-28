@@ -403,7 +403,8 @@ vjpSlice op resultBars cmap = case getResultBar resultBars of
             then do
                 let high' = map fromIntegral (zipWith (-) xShape (map fromIntegral limit :: [Integer])) :: [Int64]
                     interior = replicate rank (0 :: Int64)
-                zero <- bconstant xType 0.0
+                let zeroType = TensorType [] (ttDType xType)
+                zero <- bconstant zeroType 0.0
                 dx <- bpad bar zero low high' interior xType
                 accumulate cmap xVid dx
             else do
@@ -413,7 +414,8 @@ vjpSlice op resultBars cmap = case getResultBar resultBars of
                     stride' = map fromIntegral stride :: [Integer]
                     high' = map fromIntegral (zipWith (-) xShape (zipWith (+) start' (zipWith (*) (zipWith (-) limit' start') stride'))) :: [Int64]
                     interior = map (\s -> max 0 (s - 1)) stride :: [Int64]
-                zero <- bconstant xType 0.0
+                    zeroType = TensorType [] (ttDType xType)
+                zero <- bconstant zeroType 0.0
                 dx <- bpad bar zero low high' interior xType
                 accumulate cmap xVid dx
     Nothing -> return cmap

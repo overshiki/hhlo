@@ -21,9 +21,11 @@
 module HHLO.Autograd
     ( module HHLO.Autograd.Core
     , module HHLO.Autograd.Grad
+    , module HHLO.Autograd.ParamTree
     , module HHLO.Autograd.Rules
     ) where
 
 import HHLO.Autograd.Core
 import HHLO.Autograd.Grad
+import HHLO.Autograd.ParamTree
 import HHLO.Autograd.Rules

@@ -88,7 +88,6 @@ the common compile-and-run workflow:
 * Test count: 181 CPU tests + 6 GPU integration tests.
 
 ## 0.6.0.0 -- 2026-04-28
-
 * **Convolution & pooling VJP rules** — autograd now supports backprop through
   `conv2d`, `transposeConvolution`, `maxPool`, and `avgPool`.
   * `vjpConvolution` / `vjpTransposeConvolution` emit backward input via
@@ -99,6 +98,32 @@ the common compile-and-run workflow:
   * New primitive emitters: `bconvolution`, `breverse`.
   * PJRT parser compatibility: `stablehlo.reverse` custom pretty-printer and
     `batch_group_count` / `feature_group_count` attributes on backward convs.
-* New E2E autograd tests: `grad conv2d`, `grad maxPool`, `grad avgPool`.
-* New unit tests: `vjpConvolution`, `vjpTransposeConvolution`, `vjpReduceWindow`.
-* Test count: 187 CPU tests + 6 GPU integration tests.
+  
+## 0.7.0.0 -- 2026-04-28
+
+* **Multi-parameter gradients** — `gradModule` is no longer limited to a single
+  input. New combinators `gradModule2`, `gradModule3`, `grad2`, `grad3`
+  differentiate w.r.t. multiple tensors natively.
+* **ParamTree** — generic pack/unpack for structured parameter records.
+  Derive via `GHC.Generics` and use `gradWithParams` to train models with
+  dozens of weight tensors without manual offset math.
+  ```haskell
+  data MLPParams = MLPParams { w :: Tensor '[2,2] 'F32, b :: Tensor '[2] 'F32 }
+      deriving (Generic)
+  instance ParamTree MLPParams
+  trainStep params x = gradWithParams loss params x
+  ```
+
+* New E2E autograd tests: `grad conv2d`, `grad maxPool`, `grad avgPool`,
+  `grad2 multiply`, `gradWithParams`.
+* New unit tests: `vjpConvolution`, `vjpTransposeConvolution`, `vjpReduceWindow`,
+  `gradModule2`.
+* Bug fix: `vjpSlice` padding value is now a 0D scalar (required by
+  `stablehlo.pad`).
+  
+* **Comprehensive tutorial** — new document `doc/tutorial.md` (720 lines)
+  providing a complete guided tour from `add` two scalars to multi-GPU
+  distributed inference. Covers: shapes-as-types, the full EDSL, NN primitives,
+  autograd (`grad`/`grad2`/`grad3`/ParamTree), control flow, async execution,
+  and a deep-dive into the architecture and PJRT pipeline.
+* Test count: 190 CPU tests + 6 GPU integration tests.

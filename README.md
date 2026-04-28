@@ -151,6 +151,38 @@ gradMod = gradModule @'[3] @'F32 $ \x -> do
     sumAll sq
 ```
 
+**Multi-parameter gradients** — differentiate w.r.t. multiple inputs natively:
+
+```haskell
+-- g(x, y) = sum(x * y)   =>   (grad_x = y, grad_y = x)
+(gradX, gradY) <- grad2 (\x y -> sumAll =<< multiply x y) xVal yVal
+```
+
+**Structured parameters with ParamTree** — train models with many weights
+without manual pack/slice bookkeeping:
+
+```haskell
+{-# LANGUAGE DeriveGeneric #-}
+
+data MLPParams = MLPParams
+    { w1 :: Tensor '[2,2] 'F32
+    , b1 :: Tensor '[2]   'F32
+    , w2 :: Tensor '[1,2] 'F32
+    , b2 :: Tensor '[1]   'F32
+    } deriving (Generic)
+
+instance ParamTree MLPParams
+
+loss p x = do
+    h  <- relu =<< add (matmul x (w1 p)) (b1 p)
+    y  <- add (matmul h (w2 p)) (b2 p)
+    diff <- sub y target
+    sumAll =<< multiply diff diff
+
+-- Returns an MLPParams of gradients
+dParams <- gradWithParams loss params x
+```
+
 **In-place combinators** — use inside `buildModule` for composability:
 
 ```haskell
@@ -168,7 +200,7 @@ vjpModule @'[3] @'[2] @'F32
     (\x -> do w <- constant @'[2,3] @'F32 1.0; matmul w x)
 ```
 
-Supported ops: `add`, `subtract`, `multiply`, `divide`, `negate`, `exponential`, `log`, `sqrt`, `power`, `sine`, `cosine`, `tanh`, `abs`, `maximum`, `minimum`, `reshape`, `transpose`, `broadcast_in_dim`, `reduce` (sum), `dot`, `select`, `slice`, `pad`, `concatenate`, `convert`, and more.
+Supported ops: `add`, `subtract`, `multiply`, `divide`, `negate`, `exponential`, `log`, `sqrt`, `power`, `sine`, `cosine`, `tanh`, `abs`, `maximum`, `minimum`, `reshape`, `transpose`, `broadcast_in_dim`, `reduce` (sum), `dot`, `select`, `slice`, `pad`, `concatenate`, `convert`, `convolution`, `reduce_window`, and more.
 
 Ops without gradient rules (e.g. `compare`, `floor`, `ceil`, `sort`) safely return zero gradients. Stubs (e.g. `gather`, `scatter`) error explicitly.
 
@@ -266,7 +298,7 @@ cabal run example-autograd-basic --flag=examples
 ### 4. Run tests
 
 ```bash
-cabal test                    # 181 CPU tests
+cabal test                    # 190 CPU tests
 cabal test --test-options="-t HHLO+GPU"   # + 6 GPU integration tests
 ```
 
@@ -311,6 +343,7 @@ Standalone examples live in `examples/` and cover arithmetic, neural networks, c
 | **34** | **`example-autograd-basic`** | **Gradient of `sum(x²)`** |
 | **35** | **`example-autograd-linear`** | **Gradient of linear + MSE loss** |
 | **36** | **`example-autograd-composite`** | **Gradient through ReLU + linear + sum** |
+| **37** | **`example-autograd-multiparam`** | **`gradWithParams` on a record of weights** |
 | 27 | `example-gpu-add` | GPU smoke test |
 | 28 | `example-gpu-matmul-bench` | GPU 4096×4096 benchmark |
 | 29 | `example-multi-gpu-inference` | Multi-GPU concurrent matmul |
@@ -402,8 +435,9 @@ cabal run example-gpu-matmul-bench --flag=examples
 │   ├── Autograd/           # Reverse-mode automatic differentiation
 │   │   ├── Autograd.hs     # Public re-export module
 │   │   ├── Core.hs         # BTensor (runtime-typed backward handles)
-│   │   ├── Grad.hs         # grad, vjp, gradModule, vjpModule
-│   │   └── Rules.hs        # Per-op VJP rules (~25 ops)
+│   │   ├── Grad.hs         # grad, grad2, grad3, gradModule, gradModule2, gradModule3
+│   │   ├── ParamTree.hs    # Generic pack/unpack for multi-parameter training
+│   │   └── Rules.hs        # Per-op VJP rules (~30 ops)
 │   ├── Core/Types.hs       # DType, Shape, HostType type families
 │   ├── IR/
 │   │   ├── AST.hs          # MLIR AST (Operation, Function, Module)

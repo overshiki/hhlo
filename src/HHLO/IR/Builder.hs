@@ -9,7 +9,9 @@ module HHLO.IR.Builder
     ( Builder
     , runBuilder
     , runBuilder2
+    , runBuilder3
     , runBuilderT
+    , BuildState(..)
     , Tensor(..)
     , Tuple2(..)
     , Tuple3(..)
@@ -52,9 +54,10 @@ import HHLO.IR.AST
 
 -- | Mutable state accumulated while building a function.
 data BuildState = BuildState
-    { bsNextId   :: !Int
-    , bsOps      :: ![Operation]
-    , bsArgCount :: !Int
+    { bsNextId       :: !Int
+    , bsOps          :: ![Operation]
+    , bsArgCount     :: !Int
+    , bsBlockArgBase :: !Int
     }
 
 -- | Monad for constructing a sequence of MLIR operations.
@@ -133,7 +136,7 @@ tensorType _ _ = TensorType (shapeVal (Proxy @s)) (dtypeVal (Proxy @d))
 runBuilder :: forall s d. (KnownShape s, KnownDType d) => Text -> [FuncArg] -> Builder (Tensor s d) -> Function
 runBuilder name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (Tensor finalVid, finalState) = runState m initState
         resultType = tensorType (Proxy @s) (Proxy @d)
         ops = reverse $ bsOps finalState
@@ -144,7 +147,7 @@ runBuilder2 :: forall s1 d1 s2 d2. (KnownShape s1, KnownDType d1, KnownShape s2,
             => Text -> [FuncArg] -> Builder (Tuple2 s1 d1 s2 d2) -> Function
 runBuilder2 name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (Tuple2 (Tensor v1) (Tensor v2), finalState) = runState m initState
         rt1 = tensorType (Proxy @s1) (Proxy @d1)
         rt2 = tensorType (Proxy @s2) (Proxy @d2)
@@ -155,7 +158,7 @@ runBuilder3 :: forall s1 d1 s2 d2 s3 d3. (KnownShape s1, KnownDType d1, KnownSha
             => Text -> [FuncArg] -> Builder (Tuple3 s1 d1 s2 d2 s3 d3) -> Function
 runBuilder3 name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (Tuple3 (Tensor v1) (Tensor v2) (Tensor v3), finalState) = runState m initState
         rt1 = tensorType (Proxy @s1) (Proxy @d1)
         rt2 = tensorType (Proxy @s2) (Proxy @d2)
@@ -167,7 +170,7 @@ runBuilder4 :: forall s1 d1 s2 d2 s3 d3 s4 d4. (KnownShape s1, KnownDType d1, Kn
             => Text -> [FuncArg] -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4) -> Function
 runBuilder4 name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (Tuple4 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4), finalState) = runState m initState
         rt1 = tensorType (Proxy @s1) (Proxy @d1)
         rt2 = tensorType (Proxy @s2) (Proxy @d2)
@@ -180,7 +183,7 @@ runBuilder5 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5. (KnownShape s1, KnownDType 
             => Text -> [FuncArg] -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5) -> Function
 runBuilder5 name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (Tuple5 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4) (Tensor v5), finalState) = runState m initState
         rt1 = tensorType (Proxy @s1) (Proxy @d1)
         rt2 = tensorType (Proxy @s2) (Proxy @d2)
@@ -194,7 +197,7 @@ runBuilder6 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6. (KnownShape s1, Known
             => Text -> [FuncArg] -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6) -> Function
 runBuilder6 name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (Tuple6 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4) (Tensor v5) (Tensor v6), finalState) = runState m initState
         rt1 = tensorType (Proxy @s1) (Proxy @d1)
         rt2 = tensorType (Proxy @s2) (Proxy @d2)
@@ -209,7 +212,7 @@ runBuilder7 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7. (KnownShape s1,
             => Text -> [FuncArg] -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7) -> Function
 runBuilder7 name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (Tuple7 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4) (Tensor v5) (Tensor v6) (Tensor v7), finalState) = runState m initState
         rt1 = tensorType (Proxy @s1) (Proxy @d1)
         rt2 = tensorType (Proxy @s2) (Proxy @d2)
@@ -225,7 +228,7 @@ runBuilder8 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8. (KnownSha
             => Text -> [FuncArg] -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8) -> Function
 runBuilder8 name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (Tuple8 (Tensor v1) (Tensor v2) (Tensor v3) (Tensor v4) (Tensor v5) (Tensor v6) (Tensor v7) (Tensor v8), finalState) = runState m initState
         rt1 = tensorType (Proxy @s1) (Proxy @d1)
         rt2 = tensorType (Proxy @s2) (Proxy @d2)
@@ -293,7 +296,7 @@ moduleFromBuilder8 name args' action =
 runBuilderT :: forall ss ds. TupleBuilder (Tuple ss ds) => Text -> [FuncArg] -> Builder (Tuple ss ds) -> Function
 runBuilderT name args' builderAction =
     let Builder m = builderAction
-        initState = BuildState 0 [] 0
+        initState = BuildState 0 [] 0 1000
         (tupleResult, finalState) = runState m initState
         rtypes = tupleTypes (Proxy @(Tuple ss ds))
         rvids  = tupleVids tupleResult
@@ -348,11 +351,11 @@ emitOpRegionsN name operands operandTypes attrs regions resultTypes = do
 runBlockBuilder :: [TensorType] -> Builder a -> Builder Block
 runBlockBuilder argTypes (Builder inner) = do
     parent <- get
-    let startCount = bsArgCount parent
-        blockArgs = zipWith (\i t -> FuncArg (T.pack ("arg" ++ show i)) t) [startCount..] argTypes
-        innerState0 = BuildState (bsNextId parent) [] startCount
+    let base = bsBlockArgBase parent
+        blockArgs = zipWith (\i t -> FuncArg (T.pack ("arg" ++ show i)) t) [base..] argTypes
+        innerState0 = BuildState (bsNextId parent) [] base (base + length argTypes)
         (_, innerState) = runState inner innerState0
-    put $ parent { bsNextId = bsNextId innerState }
+    put $ parent { bsNextId = bsNextId innerState, bsBlockArgBase = bsBlockArgBase innerState }
     return $ Block blockArgs (reverse $ bsOps innerState)
 
 -- | Emit a 'stablehlo.return' terminator inside a region.

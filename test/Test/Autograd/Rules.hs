@@ -1,7 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE OverloadedStrings #-}
-
 module Test.Autograd.Rules (tests) where
 
 import Prelude hiding (negate)
@@ -78,4 +77,12 @@ tests = testGroup "Autograd.Rules"
             modu = gradModule @'[1, 2, 2, 1] @'F32 f
             text = render modu
         assertBool "contains convolution" ("convolution" `T.isInfixOf` text)
+    , testCase "gradModule2" $ do
+        let f x y = do
+                z <- multiply x y
+                sumAll z
+            modu = gradModule2 @'[2] @'F32 @'[2] @'F32 f
+            text = render modu
+        assertBool "contains func.func" ("func.func" `T.isInfixOf` text)
+        assertBool "two results" $ (length $ filter (=="->") $ T.chunksOf 2 text) >= 1
     ]
