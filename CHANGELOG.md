@@ -67,7 +67,6 @@ the common compile-and-run workflow:
 * New dependency: `directory` (for plugin-path discovery in `withCPU`/`withGPU`).
 * Test count: 155 CPU tests + 6 GPU integration tests.
 
-
 ## 0.5.0.0 -- 2026-04-27
 
 * **Autograd** — reverse-mode automatic differentiation is now part of HHLO.
@@ -87,3 +86,19 @@ the common compile-and-run workflow:
 * Bug fix: `stablehlo.sort` now wraps its region in parentheses for PJRT
   v1.16.0 parser compatibility.
 * Test count: 181 CPU tests + 6 GPU integration tests.
+
+## 0.6.0.0 -- 2026-04-28
+
+* **Convolution & pooling VJP rules** — autograd now supports backprop through
+  `conv2d`, `transposeConvolution`, `maxPool`, and `avgPool`.
+  * `vjpConvolution` / `vjpTransposeConvolution` emit backward input via
+    flipped-kernel transposed conv and skip backward-kernel computation when
+    the kernel is a constant (the common `gradModule` case).
+  * `vjpReduceWindow` supports both sum-based (avgPool) and select-mask-based
+    (maxPool) backward passes.
+  * New primitive emitters: `bconvolution`, `breverse`.
+  * PJRT parser compatibility: `stablehlo.reverse` custom pretty-printer and
+    `batch_group_count` / `feature_group_count` attributes on backward convs.
+* New E2E autograd tests: `grad conv2d`, `grad maxPool`, `grad avgPool`.
+* New unit tests: `vjpConvolution`, `vjpTransposeConvolution`, `vjpReduceWindow`.
+* Test count: 187 CPU tests + 6 GPU integration tests.
