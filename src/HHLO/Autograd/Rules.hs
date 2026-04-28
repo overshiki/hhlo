@@ -13,6 +13,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Debug.Trace (trace)
 
 import HHLO.IR.AST
 import HHLO.IR.Builder
@@ -61,6 +62,8 @@ backwardStep cmap op
         "stablehlo.floor"        -> return cmap  -- non-differentiable
         "stablehlo.ceil"         -> return cmap  -- non-differentiable
         "stablehlo.sort"         -> error "autograd-hhlo: sort/topK is not differentiable"
+        "stablehlo.reduce_window" -> vjpReduceWindow op resultBars cmap
+        "stablehlo.convolution"   -> vjpConvolution op resultBars cmap
         _ -> error $ T.unpack $ "autograd-hhlo: no VJP rule for " <> opName op
   where
     resultBars = map (\r -> Map.lookup r cmap) (opResults op)
@@ -597,3 +600,354 @@ vjpTanh op resultBars cmap = case getResultBar resultBars of
         dx <- bmultiply bar oneMinus
         accumulate cmap (btVid x) dx
     Nothing -> return cmap
+
+-- ---------------------------------------------------------------------------
+-- reduce_window VJP rule
+-- ---------------------------------------------------------------------------
+
+vjpReduceWindow :: Operation -> [Maybe BTensor] -> Map ValueId BTensor -> Builder (Map ValueId BTensor)
+vjpReduceWindow op resultBars cmap = case getResultBar resultBars of
+    Just bar -> do
+        let x = operandBT op 0
+            xType = btType x
+            xVid  = btVid x
+            xShape = ttShape xType
+            rank = length xShape
+
+        -- Detect reduction type by inspecting the region.
+        let isAdd = any regionHasAdd (opRegions op)
+            isMax = any regionHasMax (opRegions op)
+            regionHasAdd (Region blocks) = any blockHasAdd blocks
+            blockHasAdd (Block _ ops) = any (\o -> opName o == "stablehlo.add") ops
+            regionHasMax (Region blocks) = any blockHasMax blocks
+            blockHasMax (Block _ ops) = any (\o -> opName o == "stablehlo.maximum") ops
+
+        -- Parse window attributes.
+        let windowDims = findRawIntList "window_dimensions" (opAttributes op)
+            strides    = findRawIntList "window_strides" (opAttributes op)
+            padding    = findPadding (opAttributes op)
+
+        if isAdd
+            then vjpReduceWindowAdd bar xVid xType windowDims strides padding rank xShape cmap
+            else if isMax
+                then vjpReduceWindowMax bar x xType windowDims strides padding rank xShape cmap
+                else error "autograd-hhlo: reduce_window VJP only supports add and maximum reductions"
+    Nothing -> return cmap
+
+vjpReduceWindowAdd :: BTensor -> ValueId -> TensorType -> [Int64] -> [Int64] -> [[Int64]] -> Int -> [Integer] -> Map ValueId BTensor -> Builder (Map ValueId BTensor)
+vjpReduceWindowAdd bar xVid xType windowDims strides padding _rank xShape cmap = do
+    -- Only non-overlapping windows with VALID padding.
+    let isNonOverlapping = and (zipWith (==) windowDims strides)
+        isValid = all (all (== 0)) padding
+    if not (isNonOverlapping && isValid)
+        then error "autograd-hhlo: reduce_window(add) VJP only supports non-overlapping windows with VALID padding"
+        else do
+            -- For non-overlapping sum-pooling, each output gradient is
+            -- broadcast back to its window.
+            dx <- broadcastToInputShape bar xShape windowDims strides
+            accumulate cmap xVid dx
+
+vjpReduceWindowMax :: BTensor -> BTensor -> TensorType -> [Int64] -> [Int64] -> [[Int64]] -> Int -> [Integer] -> Map ValueId BTensor -> Builder (Map ValueId BTensor)
+vjpReduceWindowMax bar x xType windowDims strides padding _rank xShape cmap = do
+    -- Only non-overlapping windows with VALID padding.
+    let isNonOverlapping = and (zipWith (==) windowDims strides)
+        isValid = all (all (== 0)) padding
+    if not (isNonOverlapping && isValid)
+        then error "autograd-hhlo: reduce_window(max) VJP only supports non-overlapping windows with VALID padding"
+        else do
+            let zeroValType = TensorType [] (ttDType xType)
+                -- Compute the reduced output shape for NHWC non-overlapping pooling.
+                outShape = map (\(sz, w) -> (sz - fromIntegral w) `div` fromIntegral w + 1) (zip xShape windowDims)
+                outType = TensorType outShape (ttDType xType)
+            -- Recompute forward max.
+            negInf <- bconstant zeroValType (-1.0e30)
+            maxVals <- breduceWindowMax x negInf windowDims strides padding outType
+            -- Broadcast maxVals back to input shape.
+            maxBroadcast <- broadcastToInputShape maxVals xShape windowDims strides
+            -- Broadcast bar (gradient) back to input shape.
+            barBroadcast <- broadcastToInputShape bar xShape windowDims strides
+            -- mask = (input == maxBroadcast)
+            mask <- bcompareEQ x maxBroadcast
+            -- dx = select(mask, barBroadcast, 0)
+            zero <- bconstant xType 0.0
+            dx <- bselect mask barBroadcast zero xType
+            accumulate cmap (btVid x) dx
+
+-- | Broadcast a reduced tensor back to the original input shape for
+-- non-overlapping reduce_window.
+-- | Broadcast a reduced tensor back to the original input shape for
+-- non-overlapping reduce_window (NHWC with 2 spatial dims).
+broadcastToInputShape :: BTensor -> [Integer] -> [Int64] -> [Int64] -> Builder BTensor
+broadcastToInputShape reduced xShape windowDims _strides = do
+    let reducedShape = ttShape (btType reduced)
+        -- reducedShape = [N, outH, outW, C]
+        -- Insert size-1 after outH and outW.
+        reshapedShape = [reducedShape !! 0, reducedShape !! 1, 1, reducedShape !! 2, 1, reducedShape !! 3]
+        -- Broadcast to [N, outH, kh, outW, kw, C]
+        broadcastShape = [reducedShape !! 0, reducedShape !! 1, fromIntegral (windowDims !! 1), reducedShape !! 2, fromIntegral (windowDims !! 2), reducedShape !! 3]
+        broadcastDims = [0, 1, 2, 3, 4, 5] :: [Int64]
+    reshaped <- breshape reduced (TensorType reshapedShape (ttDType (btType reduced)))
+    broadcasted <- bbroadcastInDim reshaped broadcastDims (TensorType broadcastShape (ttDType (btType reduced)))
+    -- Reshape back to [N, H, W, C]
+    breshape broadcasted (TensorType xShape (ttDType (btType reduced)))
+
+findRawIntList :: Text -> [Attribute] -> [Int64]
+findRawIntList _ [] = []
+findRawIntList name (AttrRaw raw : rest) =
+    let key = name <> " = array<i64:"
+    in if key `T.isInfixOf` raw
+        then parseIntList raw
+        else findRawIntList name rest
+findRawIntList name (_ : rest) = findRawIntList name rest
+
+findPadding :: [Attribute] -> [[Int64]]
+findPadding [] = []
+findPadding (AttrRaw raw : rest) =
+    let key = "padding = dense<"
+    in if key `T.isInfixOf` raw
+        then parsePadding raw
+        else findPadding rest
+findPadding (_ : rest) = findPadding rest
+
+parsePadding :: Text -> [[Int64]]
+parsePadding raw =
+    let inner = extractNestedBrackets raw
+        pairs = T.splitOn "], [" inner
+    in map parsePair pairs
+  where
+    extractNestedBrackets txt =
+        let afterFirstBracket = T.tail $ T.dropWhile (/= '[') txt
+        in go afterFirstBracket 1 ""
+      where
+        go txt' depth acc
+            | T.null txt' = acc
+            | T.head txt' == ']' && depth == 1 = acc
+            | T.head txt' == '[' = go (T.tail txt') (depth + 1) (acc <> "[")
+            | T.head txt' == ']' = go (T.tail txt') (depth - 1) (acc <> "]")
+            | otherwise = go (T.tail txt') depth (acc <> T.pack [T.head txt'])
+    parsePair t =
+        let nums = T.splitOn ", " (T.filter (/= '[') (T.filter (/= ']') t))
+        in map (read . T.unpack . T.strip) nums
+
+-- ---------------------------------------------------------------------------
+-- Convolution VJP rule (NHWC only)
+-- ---------------------------------------------------------------------------
+
+vjpConvolution :: Operation -> [Maybe BTensor] -> Map ValueId BTensor -> Builder (Map ValueId BTensor)
+vjpConvolution op resultBars cmap = case getResultBar resultBars of
+    Just bar -> do
+        let input = operandBT op 0
+            kernel = operandBT op 1
+            inputType = btType input
+            kernelType = btType kernel
+            attrs = opAttributes op
+            dimNums = lookupAttrString "dim_numbers" attrs
+        -- Dispatch based on whether this is a regular conv or transpose conv.
+        -- Regular conv:  "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]"
+        -- Transpose conv: "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]"
+        let windowStr = lookupAttrString "window" attrs
+            (stride, pad, lhsDilate, _rhsDilate) = parseWindowString windowStr
+        if dimNums == "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]"
+            then do
+                -- Regular convolution.
+                dInput <- convBackwardInput bar kernel kernelType inputType stride pad
+                cmap' <- accumulate cmap (btVid input) dInput
+                -- Only compute kernel gradient if the kernel is a function argument
+                -- (negative ValueId) or if its gradient is already needed.
+                let needKernelGrad = btVid kernel < 0 || Map.member (btVid kernel) cmap
+                if needKernelGrad
+                    then do
+                        dKernel <- convBackwardKernel input inputType bar stride pad
+                        accumulate cmap' (btVid kernel) dKernel
+                    else return cmap'
+            else if dimNums == "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]"
+            then do
+                -- Transposed convolution.
+                dInput <- transposeConvBackwardInput bar kernel inputType lhsDilate pad
+                cmap' <- accumulate cmap (btVid input) dInput
+                let needKernelGrad = btVid kernel < 0 || Map.member (btVid kernel) cmap
+                if needKernelGrad
+                    then do
+                        dKernel <- transposeConvBackwardKernel input inputType bar lhsDilate pad
+                        accumulate cmap' (btVid kernel) dKernel
+                    else return cmap'
+            else error "autograd-hhlo: convolution VJP only supports NHWC dim_numbers"
+    Nothing -> return cmap
+
+convBackwardInput :: BTensor -> BTensor -> TensorType -> TensorType -> [Int64] -> [[Int64]] -> Builder BTensor
+convBackwardInput bar kernel kernelType inputType stride pad = do
+    -- Flip kernel spatially (dims 0 and 1).
+    flippedKernel <- breverse kernel [0, 1] kernelType
+    -- Backward input uses transposed conv dimension numbers.
+    -- Window attributes only apply to spatial dims (first 2 of kernel shape).
+    let spatialKernelShape = take 2 (ttShape kernelType)
+        spatialReversePad = reversePad pad stride spatialKernelShape
+        windowStr = buildWindowString [1, 1] spatialReversePad stride [1, 1]
+    bconvolution bar flippedKernel "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] inputType
+
+convBackwardKernel :: BTensor -> TensorType -> BTensor -> [Int64] -> [[Int64]] -> Builder BTensor
+convBackwardKernel input inputType bar stride pad = do
+    -- Transpose input: [N, H, W, C_in] -> [H, W, C_in, N]
+    let inputShape = ttShape inputType
+        inputTShape = tail inputShape ++ [head inputShape]
+    inputT <- btranspose input [1, 2, 3, 0] (TensorType inputTShape (ttDType inputType))
+    -- Transpose bar (dy): [N, outH, outW, C_out] -> [outH, outW, N, C_out]
+    let barShape = ttShape (btType bar)
+        barTShape = tail barShape ++ [head barShape]
+    barT <- btranspose bar [1, 2, 3, 0] (TensorType barTShape (ttDType (btType bar)))
+    -- Convolve with adapted dim numbers.  Window uses spatial dims only.
+    let spatialKernelShape = take 2 (tail inputShape)
+        outType = TensorType (spatialKernelShape ++ [last inputShape, last barShape]) (ttDType inputType)
+        windowStr = buildWindowString stride pad [1, 1] [1, 1]
+    dk <- bconvolution inputT barT "[0, 1, f, b]x[0, 1, b, f]->[0, 1, i, o]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] outType
+    -- Transpose output dims 2 and 3: [kh, kw, C_in, C_out] -> [kh, kw, C_out, C_in]
+    btranspose dk [0, 1, 3, 2] outType
+
+-- ---------------------------------------------------------------------------
+-- Transpose convolution backward helpers
+-- ---------------------------------------------------------------------------
+
+transposeConvBackwardInput :: BTensor -> BTensor -> TensorType -> [Int64] -> [[Int64]] -> Builder BTensor
+transposeConvBackwardInput bar kernel inputType lhsDilate pad = do
+    -- Backward input: conv(dy, kernel) with stride = lhs_dilate.
+    let windowStr = buildWindowString lhsDilate pad [1, 1] [1, 1]
+    bconvolution bar kernel "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] inputType
+
+transposeConvBackwardKernel :: BTensor -> TensorType -> BTensor -> [Int64] -> [[Int64]] -> Builder BTensor
+transposeConvBackwardKernel input inputType bar lhsDilate pad = do
+    -- Transpose input: [N, H, W, C_in] -> [H, W, C_in, N]
+    let inputShape = ttShape inputType
+        inputTShape = tail inputShape ++ [head inputShape]
+    inputT <- btranspose input [1, 2, 3, 0] (TensorType inputTShape (ttDType inputType))
+    -- Transpose bar: [N, outH, outW, C_out] -> [outH, outW, N, C_out]
+    let barShape = ttShape (btType bar)
+        barTShape = tail barShape ++ [head barShape]
+    barT <- btranspose bar [1, 2, 3, 0] (TensorType barTShape (ttDType (btType bar)))
+    -- Convolve with lhs_dilate = forward_lhs_dilate.  Window uses spatial dims only.
+    let spatialKernelShape = take 2 (tail inputShape)
+        outType = TensorType (spatialKernelShape ++ [last inputShape, last barShape]) (ttDType inputType)
+        windowStr = buildWindowString [1, 1] pad lhsDilate [1, 1]
+    dk <- bconvolution inputT barT "[0, 1, f, b]x[0, 1, b, f]->[0, 1, i, o]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] outType
+    -- Transpose dims 2 and 3: [kh, kw, C_in, C_out] -> [kh, kw, C_out, C_in]
+    btranspose dk [0, 1, 3, 2] outType
+
+-- ---------------------------------------------------------------------------
+-- Shared attribute parsing helpers
+-- ---------------------------------------------------------------------------
+
+parseIntList :: Text -> [Int64]
+parseIntList raw =
+    let inner = T.takeWhile (/= '>') $ T.dropWhile (/= '<') raw
+        withoutLt = T.dropWhile (== '<') inner
+        withoutPrefix = if "i64:" `T.isPrefixOf` withoutLt then T.drop 4 withoutLt else withoutLt
+        nums = T.splitOn "," withoutPrefix
+    in map ((fromIntegral :: Integer -> Int64) . read . T.unpack . T.strip) nums
+
+-- | Parse a plain bracketed int list like @[1, 2]@.
+parsePlainIntList :: Text -> [Int64]
+parsePlainIntList raw =
+    let inner = T.takeWhile (/= ']') $ T.dropWhile (/= '[') raw
+        withoutBracket = T.dropWhile (== '[') inner
+        nums = T.splitOn "," withoutBracket
+    in map (parseNum raw) nums
+  where
+    parseNum original t =
+        let s = T.unpack (T.strip t)
+        in case reads s of
+            [(n, "")] -> fromIntegral (n :: Integer)
+            _ -> error $ "parsePlainIntList: cannot parse '" ++ s ++ "' from raw='" ++ T.unpack original ++ "'"
+
+-- ---------------------------------------------------------------------------
+-- Window attribute parsing helpers
+-- ---------------------------------------------------------------------------
+
+parseWindowString :: Text -> ([Int64], [[Int64]], [Int64], [Int64])
+parseWindowString txt =
+    let s = findField "stride" txt
+        p = findField "pad" txt
+        ld = findField "lhs_dilate" txt
+        rd = findField "rhs_dilate" txt
+    in ( parsePlainIntList s
+       , parsePad p
+       , if T.null ld then [1, 1] else parsePlainIntList ld
+       , if T.null rd then [1, 1] else parsePlainIntList rd
+       )
+  where
+    -- Find a field value, handling nested brackets for the 'pad' field.
+    findField :: Text -> Text -> Text
+    findField name t =
+        let prefix = name <> " = "
+        in case T.breakOn prefix t of
+            (_, rest) | T.null rest -> ""
+            (_, rest') ->
+                let rest = T.drop (T.length prefix) rest'
+                in takeValue rest
+
+    -- Take the value, respecting bracket nesting.
+    takeValue :: Text -> Text
+    takeValue t = takeValueGo t (0 :: Int) ""
+      where
+        takeValueGo :: Text -> Int -> Text -> Text
+        takeValueGo txt bracketDepth acc
+            | T.null txt = acc
+            | T.head txt == '}' && bracketDepth == 0 = acc
+            | T.head txt == ',' && bracketDepth == 0 = acc
+            | T.head txt == '[' = takeValueGo (T.tail txt) (bracketDepth + 1) (acc <> "[")
+            | T.head txt == ']' = takeValueGo (T.tail txt) (bracketDepth - 1) (acc <> "]")
+            | otherwise = takeValueGo (T.tail txt) bracketDepth (acc <> T.pack [T.head txt])
+
+    parsePad :: Text -> [[Int64]]
+    parsePad t
+        | T.null t  = [[0, 0], [0, 0]]
+        | otherwise =
+            let -- Extract content between outermost [[ and ]]
+                inner = extractNestedBrackets t
+                pairs = T.splitOn "], [" inner
+            in map parsePair pairs
+      where
+        extractNestedBrackets txt =
+            let afterFirstBracket = T.tail $ T.dropWhile (/= '[') txt
+            in go afterFirstBracket 1 ""
+          where
+            go txt' depth acc
+                | T.null txt' = acc
+                | T.head txt' == ']' && depth == 1 = acc
+                | T.head txt' == '[' = go (T.tail txt') (depth + 1) (acc <> "[")
+                | T.head txt' == ']' = go (T.tail txt') (depth - 1) (acc <> "]")
+                | otherwise = go (T.tail txt') depth (acc <> T.pack [T.head txt'])
+
+    parsePair :: Text -> [Int64]
+    parsePair t =
+        let nums = T.splitOn ", " (T.filter (/= '[') (T.filter (/= ']') t))
+        in map parseNum nums
+      where
+        parseNum t' =
+            let s = T.unpack (T.strip t')
+            in case reads s of
+                [(n, "")] -> fromIntegral (n :: Integer)
+                _ -> error $ "parsePair: cannot parse '" ++ s ++ "' from raw='" ++ T.unpack t ++ "'"
+
+reversePad :: [[Int64]] -> [Int64] -> [Integer] -> [[Int64]]
+reversePad pad _stride kernelShape =
+    zipWith go pad (map fromIntegral kernelShape)
+  where
+    go [l, h] k = [fromIntegral (k :: Integer) - 1 - h, fromIntegral k - 1 - l]
+    go _      _ = error "reversePad: invalid padding pair"
+
+buildWindowString :: [Int64] -> [[Int64]] -> [Int64] -> [Int64] -> Text
+buildWindowString stride pad lhsDilate rhsDilate =
+    "{stride = " <> showList' stride
+    <> ", pad = " <> showPad pad
+    <> ", lhs_dilate = " <> showList' lhsDilate
+    <> ", rhs_dilate = " <> showList' rhsDilate <> "}"
+  where
+    showList' xs = "[" <> T.intercalate ", " (map (T.pack . show) xs) <> "]"
+    showPad ps = "[" <> T.intercalate ", " (map showPair ps) <> "]"
+    showPair [l, h] = "[" <> T.pack (show l) <> ", " <> T.pack (show h) <> "]"
+    showPair _      = error "buildWindowString: invalid padding pair"
+
+lookupAttrString :: Text -> [Attribute] -> Text
+lookupAttrString name = foldr f ""
+  where
+    f (AttrString n s) acc | n == name = s <> acc
+    f _ acc = acc

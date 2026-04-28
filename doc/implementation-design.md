@@ -444,15 +444,30 @@ PJRT plugins for CUDA, ROCm, and TPU all implement the same C API. To target GPU
 
 No changes to Layers 1–3 are needed. Only Layer 4 needs device enumeration APIs.
 
-### 10.2 Automatic Differentiation
+### 10.2 Automatic Differentiation ✅ Implemented
 
-Reverse-mode autodiff can be added as a source-to-source transformation on the `Builder` monad:
+Reverse-mode autodiff is implemented as a source-to-source transformation on the `Builder` monad:
 
-1. Record the computation graph during `Builder` execution
-2. Traverse the graph backward, emitting gradient ops
-3. Use `stablehlo.custom_call` for ops without native gradient definitions
+1. **`Builder` graph recording** — `runBuilderWithTrace` records every emitted operation in a `Trace` (a list of `Operation` values).
+2. **Backward traversal** — `gradModule` reverses the trace and runs a backward pass: for each forward op, its VJP rule emits gradient ops that propagate cotangents.
+3. **VJP rules** — Each primitive op has a rule in `HHLO.Autograd.Rules` that computes how gradients flow through it. Rules exist for 25+ ops including element-wise ops, reductions, matmul, convolution, transpose convolution, and reduce_window (max/avg pool).
+4. **Public API** — `grad :: (Tensor s d -> Builder (Tensor '[] d)) -> (Tensor s d -> Builder (Tensor s d))` gives the gradient of a scalar-valued function w.r.t. its input.
 
-This is analogous to JAX's `jax.grad` but operates on the AST level rather than tracing Python.
+**Multi-parameter gradient workaround:**
+`gradModule` differentiates w.r.t. a single input tensor. To differentiate w.r.t. multiple weight tensors (e.g., for training), pack all parameters into a single tensor via `concatenate`, pass that as the input, and slice it apart inside the builder:
+
+```haskell
+trainStep paramsBatch input = do
+    let (w1, w2, b1, b2) = unpackParams paramsBatch
+    y <- model w1 w2 b1 b2 input
+    loss <- mseLoss y target
+    return loss
+  where
+    unpackParams p = (slice @0 @0 @n1 p, slice @0 @n1 @n2 p,
+                      slice @0 @(n1+n2) @(n1+n2+m1) p, ...)
+```
+
+This pattern is demonstrated in `examples/35-autograd-linear.hs`.
 
 ### 10.3 Template Haskell Staging
 
@@ -501,6 +516,8 @@ These are pure Haskell combinators built on top of the existing primitives.
 | `HHLO.Runtime.Compile` | Compilation | `compile` |
 | `HHLO.Runtime.Execute` | Sync execution | `execute` |
 | `HHLO.Runtime.Async` | Async execution | `executeAsync`, `bufferReady`, `awaitBuffers` |
+| `HHLO.Autograd.Core` | AD infrastructure | `gradModule`, `grad`, `BTensor`, `badd`, `bconvolution`, `breverse` |
+| `HHLO.Autograd.Rules` | VJP rule dispatch | `vjpAdd`, `vjpMatmul`, `vjpConvolution`, `vjpReduceWindow`, ... |
 | `HHLO.Runtime.Buffer` | Buffer transfer | `toDeviceF32`, `fromDeviceF32`, `bufferDimensions` |
 
 ---

@@ -71,4 +71,62 @@ tests = testGroup "EndToEnd.Autograd"
         let expected = V.fromList [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         assertBool "grad close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "grad avgPool" $ withPJRTCPU $ \api client -> do
+        let f x = do
+                let windowDims = [1, 2, 2, 1]
+                    strides    = [1, 2, 2, 1]
+                    padding    = replicate 4 [0, 0]
+                initVal <- constant @'[] @'F32 0.0
+                y <- reduceWindow windowDims strides padding "stablehlo.add" initVal x
+                divisor <- constant @'[] @'F32 4.0
+                divisorBC <- broadcastWithDims @'[] @'[1, 2, 2, 1] [] divisor
+                z <- divide y divisorBC
+                sumAll z
+            gradModu = gradModule @'[1, 4, 4, 1] @'F32 f
+        exec <- compile api client (render gradModu)
+        let inp = V.fromList [1.0..16.0]
+        bufIn <- toDeviceF32 api client inp [1, 4, 4, 1]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 16
+        -- grad = 1/4 for every element (non-overlapping 2x2 avg pool)
+        let expected = V.fromList (replicate 16 0.25)
+        assertBool "avgPool grad close" $
+            V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "grad conv2d" $ withPJRTCPU $ \api client -> do
+        let f x = do
+                k <- constant @'[2, 2, 1, 1] @'F32 1.0
+                y <- conv2d @1 @3 @3 @1 @1 @2 @2 @2 @2 x k
+                sumAll y
+            gradModu = gradModule @'[1, 3, 3, 1] @'F32 f
+        exec <- compile api client (render gradModu)
+        let inp = V.fromList [1.0..9.0]
+        bufIn <- toDeviceF32 api client inp [1, 3, 3, 1]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 9
+        -- grad for 3x3 input with 2x2 kernel all 1s:
+        -- corners: 1, edges: 2, center: 4
+        let expected = V.fromList [1, 2, 1, 2, 4, 2, 1, 2, 1]
+        assertBool "conv2d grad close" $
+            V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "grad maxPool" $ withPJRTCPU $ \api client -> do
+        let f x = do
+                let kernel = [2, 2]
+                    stride = [2, 2]
+                    padding = [[0, 0], [0, 0]]
+                y <- maxPool @1 @4 @4 @1 @2 @2 kernel stride padding x
+                sumAll y
+            gradModu = gradModule @'[1, 4, 4, 1] @'F32 f
+        exec <- compile api client (render gradModu)
+        let inp = V.fromList [1.0..16.0]
+        bufIn <- toDeviceF32 api client inp [1, 4, 4, 1]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 16
+        -- maxPool 2x2 stride 2 on 4x4:
+        -- Window (0,0): max=6 at pos (1,1) -> index 5
+        -- Window (0,1): max=8 at pos (1,3) -> index 7
+        -- Window (1,0): max=14 at pos (3,1) -> index 13
+        -- Window (1,1): max=16 at pos (3,3) -> index 15
+        let expected = V.fromList [0,0,0,0, 0,1,0,1, 0,0,0,0, 0,1,0,1]
+        assertBool "maxPool grad close" $
+            V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     ]

@@ -164,6 +164,17 @@ instance Pretty Operation where
         fixPermAttr (AttrIntList "permutation" vals) =
             AttrRaw $ "permutation = array<i64: " <> T.intercalate ", " (map (T.pack . show) vals) <> ">"
         fixPermAttr a = a
+    pretty (Operation "stablehlo.reverse" operands operandTypes attrs regions results resultTypes) =
+        -- Generic form with array<i64: ...> for dimensions (PJRT v1.16.0 compat).
+        let attrs' = map fixRevAttr attrs
+        in prettyResultVids results <> " = \"stablehlo.reverse\"("
+           <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+           <> (if null attrs' then mempty else " " <> prettyAttrs attrs')
+           <> " : " <> prettyResultType operandTypes resultTypes
+      where
+        fixRevAttr (AttrIntList "dimensions" vals) =
+            AttrRaw $ "dimensions = array<i64: " <> T.intercalate ", " (map (T.pack . show) vals) <> ">"
+        fixRevAttr a = a
     pretty (Operation "stablehlo.concatenate" operands operandTypes attrs regions results resultTypes) =
         -- Generic form (custom form syntax varies across parser versions).
         prettyResultVids results <> " = \"stablehlo.concatenate\"("

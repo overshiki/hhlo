@@ -33,14 +33,20 @@ module HHLO.Autograd.Core
     , bconcatenate
     , bconvert
     , bcompareGE
+    , bcompareEQ
     , btoTyped
     , bfromTyped
     , reifyShape
     , accumulate
+    , breverse
+    , bconvolution
+    , breduceWindowAdd
+    , breduceWindowMax
     ) where
 
 import Data.Int (Int64)
 import Data.Proxy
+import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.TypeLits
 import qualified Data.Map.Strict as Map
@@ -292,3 +298,100 @@ bcompareGE (BTensor x t1) (BTensor y t2) = do
     vid <- emitOp "stablehlo.compare" [x, y] [t1, t2]
         [AttrRaw "comparison_direction = #stablehlo<comparison_direction GE>"] boolType
     return (BTensor vid boolType)
+
+-- | Equal comparison (returns boolean tensor).
+bcompareEQ :: BTensor -> BTensor -> Builder BTensor
+bcompareEQ (BTensor x t1) (BTensor y t2) = do
+    let boolType = TensorType (ttShape t1) Bool
+    vid <- emitOp "stablehlo.compare" [x, y] [t1, t2]
+        [AttrRaw "comparison_direction = #stablehlo<comparison_direction EQ>"] boolType
+    return (BTensor vid boolType)
+
+-- | Reverse a tensor along specified dimensions.
+breverse :: BTensor -> [Int64] -> TensorType -> Builder BTensor
+breverse (BTensor x t) dims outType = do
+    let dimsAttr = AttrIntList "dimensions" dims
+    vid <- emitOp "stablehlo.reverse" [x] [t] [dimsAttr] outType
+    return (BTensor vid outType)
+
+-- | Generic convolution emitter.
+--
+-- This is the low-level primitive used by VJP rules.  It emits a
+-- @stablehlo.convolution@ with fully-specified dimension numbers and
+-- window attributes.
+bconvolution :: BTensor -> BTensor -> Text -> Text -> [Attribute] -> TensorType -> Builder BTensor
+bconvolution (BTensor lhs lhsType) (BTensor rhs rhsType) dimNums windowStr extraAttrs outType = do
+    let attrs =
+            [ AttrString "dim_numbers" dimNums
+            , AttrString "window" windowStr
+            ] ++ extraAttrs
+    vid <- emitOp "stablehlo.convolution"
+            [lhs, rhs]
+            [lhsType, rhsType]
+            attrs
+            outType
+    return (BTensor vid outType)
+
+-- | Reduce a BTensor over specified window dimensions with @add@.
+breduceWindowAdd :: BTensor -> BTensor -> [Int64] -> [Int64] -> [[Int64]] -> TensorType -> Builder BTensor
+breduceWindowAdd (BTensor input inType) (BTensor initVal initType) windowDims strides padding outType = do
+    let elemType = TensorType [] (ttDType inType)
+    -- Build the add reduction region.
+    redBlock <- runBlockBuilder [elemType, elemType] $ do
+        a <- arg @'[] @( 'F32)
+        b <- arg @'[] @( 'F32)
+        sumVid <- emitOp "stablehlo.add"
+                    [tensorValue a, tensorValue b]
+                    [elemType, elemType] [] elemType
+        emitReturn [sumVid] [elemType]
+
+    let windowAttr  = AttrRaw $ "window_dimensions = array<i64: "
+            <> T.intercalate ", " ((T.pack . show) <$> windowDims) <> ">"
+        strideAttr  = AttrRaw $ "window_strides = array<i64: "
+            <> T.intercalate ", " ((T.pack . show) <$> strides) <> ">"
+        paddingAttr = AttrRaw $ "padding = dense<[["
+            <> T.intercalate "], [" (padPair <$> padding) <> "]]> : tensor<"
+            <> T.pack (show (length padding)) <> "x2xi64>"
+
+    vid <- emitOpRegions "stablehlo.reduce_window"
+            [input, initVal]
+            [inType, initType]
+            [windowAttr, strideAttr, paddingAttr]
+            [Region [redBlock]]
+            outType
+    return (BTensor vid outType)
+  where
+    padPair [l, h] = T.pack (show l) <> ", " <> T.pack (show h)
+    padPair _      = error "breduceWindowAdd: padding must be [[low,high], ...]"
+
+-- | Reduce a BTensor over specified window dimensions with @maximum@.
+breduceWindowMax :: BTensor -> BTensor -> [Int64] -> [Int64] -> [[Int64]] -> TensorType -> Builder BTensor
+breduceWindowMax (BTensor input inType) (BTensor initVal initType) windowDims strides padding outType = do
+    let elemType = TensorType [] (ttDType inType)
+    -- Build the max reduction region.
+    redBlock <- runBlockBuilder [elemType, elemType] $ do
+        a <- arg @'[] @( 'F32)
+        b <- arg @'[] @( 'F32)
+        maxVid <- emitOp "stablehlo.maximum"
+                    [tensorValue a, tensorValue b]
+                    [elemType, elemType] [] elemType
+        emitReturn [maxVid] [elemType]
+
+    let windowAttr  = AttrRaw $ "window_dimensions = array<i64: "
+            <> T.intercalate ", " ((T.pack . show) <$> windowDims) <> ">"
+        strideAttr  = AttrRaw $ "window_strides = array<i64: "
+            <> T.intercalate ", " ((T.pack . show) <$> strides) <> ">"
+        paddingAttr = AttrRaw $ "padding = dense<[["
+            <> T.intercalate "], [" (padPair <$> padding) <> "]]> : tensor<"
+            <> T.pack (show (length padding)) <> "x2xi64>"
+
+    vid <- emitOpRegions "stablehlo.reduce_window"
+            [input, initVal]
+            [inType, initType]
+            [windowAttr, strideAttr, paddingAttr]
+            [Region [redBlock]]
+            outType
+    return (BTensor vid outType)
+  where
+    padPair [l, h] = T.pack (show l) <> ", " <> T.pack (show h)
+    padPair _      = error "breduceWindowMax: padding must be [[low,high], ...]"

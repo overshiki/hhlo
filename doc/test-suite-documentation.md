@@ -1,7 +1,7 @@
 # HHLO Test Suite — Comprehensive Documentation
 
 **Date:** 2026-04-20  
-**Test Count:** 115 tests across 13 modules  
+**Test Count:** 187 tests across 15 modules  
 **Framework:** `tasty` + `tasty-hunit`  
 **Entry Point:** `test/Main.hs` → `test-suite hhlo-test` in `hhlo.cabal`
 
@@ -15,6 +15,7 @@ The HHLO test suite validates every layer of the stack:
 |------|------|-------|----------------|
 | **Tier 1 — Golden** | Rendered MLIR text matches expected StableHLO | `Test.IR.Pretty*`, `Test.EDSL.Ops`, `Test.IR.Builder` | ❌ No |
 | **Tier 2 — E2E Numerical** | Build → Compile → Execute → Verify on CPU | `Test.Runtime.EndToEnd*` | ✅ Yes |
+| **Tier 2 — Autograd** | Gradient computation via reverse-mode AD | `Test.Autograd.Rules`, `Test.Runtime.EndToEndAutograd` | ✅ Yes |
 | **Tier 3 — Runtime Integration** | Buffer metadata, async execution, error handling | `Test.Runtime.Buffer`, `Test.Runtime.Async`, `Test.Runtime.Errors` | ✅ Yes |
 
 All E2E tests use the PJRT CPU plugin at `deps/pjrt/libpjrt_cpu.so` (downloaded via `./pjrt_script.sh`).
@@ -117,7 +118,17 @@ Tests the `Builder` monad state management.
 | `module has func.func wrapper` | `module { func.func @main(...) }` |
 | `single result type in signature` | `-> tensor<3x4xf32>` |
 
-### 3.6 `test/Test/EDSL/Ops.hs`
+### 3.6 `test/Test/Autograd/Rules.hs`
+
+Golden tests for VJP (vector-Jacobian product) rules. Each test builds a small forward computation, applies the VJP rule, and verifies the backward MLIR contains the expected ops.
+
+| Test | Forward Op | Backward Ops Verified |
+|------|-----------|----------------------|
+| `vjpReduceWindow (avgPool)` | `avgPool` | `broadcast_in_dim`, `divide`, `pad` |
+| `vjpConvolution` | `conv2d` | `stablehlo.reverse`, `stablehlo.convolution` |
+| `vjpTransposeConvolution` | `transposeConvolution` | `stablehlo.convolution` |
+
+### 3.7 `test/Test/EDSL/Ops.hs`
 
 The largest golden test module. It exercises virtually every EDSL op and verifies that the rendered MLIR contains the expected StableHLO op name or structural pattern.
 
@@ -216,6 +227,18 @@ Uses `e2eTestF32_1arg` and `e2eTestF32_2arg` from `Test.Utils`.
 | `transpose` | `transpose` | `[[1,2],[3,4]]` → `[[1,3],[2,4]]` |
 | `concatenate` | `concatenate` | `[1,2] + [3,4]` → `[1,2,3,4]` |
 | `iota 1D` | `iota` + `convert` | `[0,1,2,3]` (iota returns `I64`, converted to `F32`) |
+
+### 4.7 `test/Test/Runtime/EndToEndAutograd.hs`
+
+| Test | What it computes | Status |
+|------|-----------------|--------|
+| `grad sum of squares` | `grad (\x -> sumAll (x * x))` | ✅ Pass |
+| `grad sum of doubles` | `grad (\x -> sumAll (x + x))` | ✅ Pass |
+| `grad sum of exponentials` | `grad (\x -> sumAll (exp x))` | ✅ Pass |
+| `grad matmul` | `grad (\x -> sumAll (matmul x w))` | ✅ Pass |
+| `grad avgPool` | `grad (\x -> sumAll (avgPool x))` | ✅ Pass |
+| `grad conv2d` | `grad (\x -> sumAll (conv2d x k))` | ✅ Pass |
+| `grad maxPool` | `grad (\x -> sumAll (maxPool x))` | ✅ Pass |
 
 ---
 

@@ -123,6 +123,7 @@
 | **18** | **Backend-agnostic plugin loading** | ✅ **`withPJRT` abstracts CPU/CUDA plugin selection.** |
 | **19** | **GPU examples & benchmarks** | ✅ **`example-gpu-add` and `example-gpu-matmul-bench` operational.** |
 | **20** | **Multi-GPU inference scaling** | ✅ **`executeReplicas` runs concurrent `executeOn` across N GPUs. `compileWithOptions` supports `num_replicas`. `example-multi-gpu-inference` verified on 8× RTX 5090.** |
+| **21** | **Autograd (reverse-mode AD)** | ✅ **`gradModule`, `grad`, and VJP rules for 25+ ops including `convolution`, `transpose_convolution`, `reduce_window`. 7 E2E autograd tests pass.** |
 
 ---
 
@@ -131,7 +132,7 @@
 ### 1. Single-Device Execution (GPU works, multi-GPU inference works)
 - `executeOn` targets exactly one device. ✅
 - `executeReplicas` distributes independent forward passes across multiple GPUs concurrently. ✅
-- **Clarification:** HHLO is an **inference-only** framework. We do not have automatic differentiation, gradients, or backpropagation. Multi-GPU means inference scaling only.
+- **Clarification:** HHLO now supports **reverse-mode automatic differentiation** via `grad` / `gradModule`. Multi-GPU still means inference scaling only — autograd runs on a single device. See the autograd examples (34–36) and the autograd section in `doc/implementation-design.md`.
 
 ### 2. PJRT CPU v1.16.0 Parser Limitations
 The specific `libpjrt_cpu.so` build from `zml/pjrt-artifacts` (StableHLO v1.16.0) has a text parser with known gaps:
@@ -190,6 +191,7 @@ The specific `libpjrt_cpu.so` build from `zml/pjrt-artifacts` (StableHLO v1.16.0
 13. ~~UNet inference example~~ ✅ Done.
 14. ~~Comprehensive test suite~~ ✅ Done.
 15. ~~Single-GPU CUDA support~~ ✅ Done.
+16. ~~Reverse-mode automatic differentiation~~ ✅ Done.
 
 ---
 
