@@ -53,29 +53,29 @@ main = do
 
                 -- Conv 3x3/1, 32 channels
                 w1 <- constant @'[3, 3, 3, 32] @'F32 0.01
-                x <- conv2dWithPadding @1 @16 @16 @3 @32 @3 @3 @16 @16 [1, 1] [[1, 1], [1, 1]] x w1
+                x <- conv2dWithPadding @1 @16 @16 @3 @32 @3 @3 @16 @16 (v2 1 1) (p2 (1,1) (1,1)) x w1
                 x <- relu x
                 -- MaxPool 2x2/2
-                x <- maxPool [2, 2] [2, 2] [[0, 0], [0, 0]] x
+                x <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) x
 
                 -- Conv 3x3/1, 64 channels
                 w2 <- constant @'[3, 3, 32, 64] @'F32 0.01
-                x <- conv2dWithPadding @1 @8 @8 @32 @64 @3 @3 @8 @8 [1, 1] [[1, 1], [1, 1]] x w2
+                x <- conv2dWithPadding @1 @8 @8 @32 @64 @3 @3 @8 @8 (v2 1 1) (p2 (1,1) (1,1)) x w2
                 x <- relu x
                 -- MaxPool 2x2/2
-                x <- maxPool [2, 2] [2, 2] [[0, 0], [0, 0]] x
+                x <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) x
 
                 -- Conv 3x3/1, 128 channels
                 w3 <- constant @'[3, 3, 64, 128] @'F32 0.01
-                x <- conv2dWithPadding @1 @4 @4 @64 @128 @3 @3 @4 @4 [1, 1] [[1, 1], [1, 1]] x w3
+                x <- conv2dWithPadding @1 @4 @4 @64 @128 @3 @3 @4 @4 (v2 1 1) (p2 (1,1) (1,1)) x w3
                 x <- relu x
 
                 -- Conv 3x3/1, 128 channels
                 w4 <- constant @'[3, 3, 128, 128] @'F32 0.01
-                x <- conv2dWithPadding @1 @4 @4 @128 @128 @3 @3 @4 @4 [1, 1] [[1, 1], [1, 1]] x w4
+                x <- conv2dWithPadding @1 @4 @4 @128 @128 @3 @3 @4 @4 (v2 1 1) (p2 (1,1) (1,1)) x w4
                 x <- relu x
                 -- MaxPool 2x2/2
-                x <- maxPool [2, 2] [2, 2] [[0, 0], [0, 0]] x
+                x <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) x
                 let x' :: Tensor '[1, 2, 2, 128] 'F32
                     x' = x
 

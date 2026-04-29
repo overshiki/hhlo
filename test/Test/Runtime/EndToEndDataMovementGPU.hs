@@ -30,7 +30,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
                 [ FuncArg "arg0" (TensorType [5] F32) ]
                 $ do
                     x <- arg @'[5] @'F32
-                    y <- slice x [1] [4] [1]
+                    y <- slice x (v1 1) (v1 4) (v1 1)
                     return y
         exec <- compile api client (render modu)
         let inp = V.fromList [0.0, 1.0, 2.0, 3.0, 4.0]
@@ -44,7 +44,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
                 [ FuncArg "arg0" (TensorType [5] F32) ]
                 $ do
                     x <- arg @'[5] @'F32
-                    y <- slice x [0] [4] [2]
+                    y <- slice x (v1 0) (v1 4) (v1 2)
                     return y
         exec <- compile api client (render modu)
         let inp = V.fromList [0.0, 1.0, 2.0, 3.0, 4.0]
@@ -59,7 +59,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
                 $ do
                     x <- arg @'[2] @'F32
                     padVal <- constant @'[] @'F32 0.0
-                    y <- pad x padVal [1] [1] [0]
+                    y <- pad x padVal (v1 1) (v1 1) (v1 0)
                     return y
         exec <- compile api client (render modu)
         let inp = V.fromList [1.0, 2.0]
@@ -210,7 +210,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
                 $ do
                     x <- arg @'[4] @'F32
                     idx <- constant @'[] @'I64 1
-                    y <- dynamicSlice x [idx] [2]
+                    y <- dynamicSlice x [idx] (v1 2)
                     return y
         exec <- compile api client (render modu)
         let inp = V.fromList [0.0, 1.0, 2.0, 3.0]

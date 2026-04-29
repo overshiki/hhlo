@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -60,6 +61,19 @@ module HHLO.EDSL.Ops
     , conv2dWithPadding
     , transposeConvolution
     , batchNormInference
+    -- * Fixed-length configuration helpers
+    , Length
+    , V
+    , V1
+    , V2
+    , V3
+    , V4
+    , Padding
+    , v1
+    , v2
+    , v3
+    , v4
+    , p2
     , layerNorm
     , globalAvgPool
     , gelu
@@ -148,6 +162,20 @@ import GHC.TypeLits
 import HHLO.Core.Types
 import HHLO.IR.AST
 import HHLO.IR.Builder
+import qualified Data.Vector.Sized as VS
+import Data.Vector.Sized (Vector)
+import qualified Data.Vector as V
+import Unsafe.Coerce (unsafeCoerce)
+
+-- | Unsafe helper: convert a list to a fixed-length vector.
+-- The caller must ensure the list length equals the rank of shape @s@.
+vecFromListUnsafe :: forall s a. KnownShape s => [a] -> Vector (Length s) a
+vecFromListUnsafe xs =
+    let expected = length (shapeVal (Proxy @s))
+        actual   = length xs
+    in if expected == actual
+       then unsafeCoerce (V.fromList xs)
+       else error $ "vecFromListUnsafe: expected length " ++ show expected ++ ", got " ++ show actual
 
 -- ---------------------------------------------------------------------------
 -- Binary element-wise ops
@@ -225,12 +253,12 @@ matmul (Tensor x) (Tensor y) = do
 
 -- | General dot product with explicit batch and contracting dimensions.
 -- Use this for batched matrix multiplication (rank > 2).
-dotGeneral :: forall s1 s2 sOut d.
-              (KnownShape s1, KnownShape s2, KnownShape sOut, KnownDType d)
-           => [Int64]   -- ^ lhs batch dims
-           -> [Int64]   -- ^ rhs batch dims
-           -> [Int64]   -- ^ lhs contracting dims
-           -> [Int64]   -- ^ rhs contracting dims
+dotGeneral :: forall s1 s2 sOut d nBatch nContract.
+              (KnownShape s1, KnownShape s2, KnownShape sOut, KnownDType d, KnownNat nBatch, KnownNat nContract)
+           => Vector nBatch Int64     -- ^ lhs batch dims
+           -> Vector nBatch Int64     -- ^ rhs batch dims
+           -> Vector nContract Int64  -- ^ lhs contracting dims
+           -> Vector nContract Int64  -- ^ rhs contracting dims
            -> Tensor s1 d
            -> Tensor s2 d
            -> Builder (Tensor sOut d)
@@ -238,8 +266,8 @@ dotGeneral lhsBatch rhsBatch lhsContract rhsContract (Tensor x) (Tensor y) = do
     let inType1 = tensorType (Proxy @s1) (Proxy @d)
         inType2 = tensorType (Proxy @s2) (Proxy @d)
         outType = tensorType (Proxy @sOut) (Proxy @d)
-        batchAttr      = AttrString "batching_dims" ("[" <> T.intercalate ", " (fmap (T.pack . show) lhsBatch) <> "] x [" <> T.intercalate ", " (fmap (T.pack . show) rhsBatch) <> "]")
-        contractingAttr = AttrString "contracting_dims" ("[" <> T.intercalate ", " (fmap (T.pack . show) lhsContract) <> "] x [" <> T.intercalate ", " (fmap (T.pack . show) rhsContract) <> "]")
+        batchAttr      = AttrString "batching_dims" ("[" <> T.intercalate ", " (fmap (T.pack . show) (VS.toList lhsBatch)) <> "] x [" <> T.intercalate ", " (fmap (T.pack . show) (VS.toList rhsBatch)) <> "]")
+        contractingAttr = AttrString "contracting_dims" ("[" <> T.intercalate ", " (fmap (T.pack . show) (VS.toList lhsContract)) <> "] x [" <> T.intercalate ", " (fmap (T.pack . show) (VS.toList rhsContract)) <> "]")
     vid <- emitOp "stablehlo.dot_general" [x, y] [inType1, inType2]
             [ batchAttr
             , contractingAttr
@@ -343,11 +371,11 @@ broadcastWithDims dims (Tensor x) = do
 --
 -- @perm@ must be a permutation of @[0 .. rank-1]@.
 transpose :: forall sIn sOut d. (KnownShape sIn, KnownShape sOut, KnownDType d)
-          => [Int64] -> Tensor sIn d -> Builder (Tensor sOut d)
+          => Vector (Length sIn) Int64 -> Tensor sIn d -> Builder (Tensor sOut d)
 transpose perm (Tensor x) = do
     let inType  = tensorType (Proxy @sIn)  (Proxy @d)
         outType = tensorType (Proxy @sOut) (Proxy @d)
-        permAttr = AttrIntList "permutation" perm
+        permAttr = AttrIntList "permutation" (VS.toList perm)
     vid <- emitOp "stablehlo.transpose" [x] [inType] [permAttr] outType
     return (Tensor vid)
 
@@ -518,7 +546,7 @@ conv2d :: forall batch h w inCh outCh kh kw oh ow.
        => Tensor '[batch, h, w, inCh] 'F32
        -> Tensor '[kh, kw, inCh, outCh] 'F32
        -> Builder (Tensor '[batch, oh, ow, outCh] 'F32)
-conv2d x k = conv2dWithPadding @batch @h @w @inCh @outCh @kh @kw @oh @ow [1, 1] (replicate 2 [0, 0]) x k
+conv2d x k = conv2dWithPadding @batch @h @w @inCh @outCh @kh @kw @oh @ow (v2 1 1) (p2 (0, 0) (0, 0)) x k
 
 -- | 2-D convolution with explicit stride and padding (NHWC format).
 --
@@ -530,8 +558,8 @@ conv2d x k = conv2dWithPadding @batch @h @w @inCh @outCh @kh @kw @oh @ow [1, 1] 
 conv2dWithPadding :: forall batch h w inCh outCh kh kw oh ow.
                      ( KnownNat batch, KnownNat h, KnownNat w, KnownNat inCh, KnownNat outCh
                      , KnownNat kh, KnownNat kw, KnownNat oh, KnownNat ow )
-                  => [Int64]        -- ^ strides [sh, sw]
-                  -> [[Int64]]      -- ^ padding [[pt, pb], [pl, pr]]
+                  => V2 Int64    -- ^ strides [sh, sw]
+                  -> P2          -- ^ padding [[pt, pb], [pl, pr]]
                   -> Tensor '[batch, h, w, inCh] 'F32
                   -> Tensor '[kh, kw, inCh, outCh] 'F32
                   -> Builder (Tensor '[batch, oh, ow, outCh] 'F32)
@@ -540,8 +568,8 @@ conv2dWithPadding strides padding input kernel = do
         inType2 = tensorType (Proxy @'[kh, kw, inCh, outCh]) (Proxy @'F32)
         outType = tensorType (Proxy @'[batch, oh, ow, outCh]) (Proxy @'F32)
         dimNums = "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]"
-        strideStr = "[" <> T.intercalate ", " ((T.pack . show) <$> strides) <> "]"
-        padStr = "[" <> T.intercalate ", " (padPair <$> padding) <> "]"
+        strideStr = "[" <> T.intercalate ", " ((T.pack . show) <$> VS.toList strides) <> "]"
+        padStr = "[" <> padPair (padding `VS.index` 0) <> ", " <> padPair (padding `VS.index` 1) <> "]"
         window  = "{stride = " <> strideStr <> ", pad = " <> padStr <> "}"
     vid <- emitOp "stablehlo.convolution"
             [tensorValue input, tensorValue kernel]
@@ -553,8 +581,7 @@ conv2dWithPadding strides padding input kernel = do
             ] outType
     return (Tensor vid)
   where
-    padPair [l, h] = "[" <> T.pack (show l) <> ", " <> T.pack (show h) <> "]"
-    padPair _      = error "conv2dWithPadding: padding must be [[low,high], ...]"
+    padPair (l, h) = "[" <> T.pack (show l) <> ", " <> T.pack (show h) <> "]"
 
 -- | Batch normalization for inference.
 --
@@ -768,11 +795,11 @@ gather :: forall sOperand sIndices sResult d.
           , KnownShape sResult, KnownDType d )
        => Tensor sOperand d
        -> Tensor sIndices 'I64
-       -> [Int64]   -- ^ offset_dims
-       -> [Int64]   -- ^ collapsed_slice_dims
-       -> [Int64]   -- ^ start_index_map
-       -> Int64     -- ^ index_vector_dim
-       -> [Int64]   -- ^ slice_sizes
+       -> [Int64]      -- ^ offset_dims
+       -> [Int64]     -- ^ collapsed_slice_dims
+       -> [Int64]     -- ^ start_index_map
+       -> Int64                               -- ^ index_vector_dim
+       -> [Int64]     -- ^ slice_sizes
        -> Builder (Tensor sResult d)
 gather operand indices offsetDims collapsedSliceDims startIndexMap indexVectorDim sliceSizes = do
     let operandType = tensorType (Proxy @sOperand) (Proxy @d)
@@ -813,10 +840,10 @@ scatter :: forall sInput sIndices sUpdates sResult d.
         -> Tensor sIndices 'I64
         -> Tensor sUpdates d
         -> (Tensor '[] d -> Tensor '[] d -> Builder (Tensor '[] d))
-        -> [Int64]   -- ^ update_window_dims
-        -> [Int64]   -- ^ inserted_window_dims
-        -> [Int64]   -- ^ scatter_dims_to_operand_dims
-        -> Int64     -- ^ index_vector_dim
+        -> [Int64]     -- ^ update_window_dims
+        -> [Int64]       -- ^ inserted_window_dims
+        -> [Int64]     -- ^ scatter_dims_to_operand_dims
+        -> Int64                               -- ^ index_vector_dim
         -> Builder (Tensor sResult d)
 scatter input indices updates updateFn updateWindowDims insertedWindowDims scatterDimsToOperandDims indexVectorDim = do
     let inputType   = tensorType (Proxy @sInput)   (Proxy @d)
@@ -860,16 +887,16 @@ scatter input indices updates updateFn updateWindowDims insertedWindowDims scatt
 slice :: forall sIn sOut d.
          (KnownShape sIn, KnownShape sOut, KnownDType d)
       => Tensor sIn d
-      -> [Int64]   -- ^ start_indices
-      -> [Int64]   -- ^ limit_indices
-      -> [Int64]   -- ^ strides
+      -> Vector (Length sIn) Int64   -- ^ start_indices
+      -> Vector (Length sIn) Int64   -- ^ limit_indices
+      -> Vector (Length sIn) Int64   -- ^ strides
       -> Builder (Tensor sOut d)
 slice operand start limit stride = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        startAttr = AttrRaw $ "start_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> start) <> ">"
-        limitAttr = AttrRaw $ "limit_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> limit) <> ">"
-        strideAttr = AttrRaw $ "strides = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> stride) <> ">"
+        startAttr = AttrRaw $ "start_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList start) <> ">"
+        limitAttr = AttrRaw $ "limit_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList limit) <> ">"
+        strideAttr = AttrRaw $ "strides = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList stride) <> ">"
 
     let (Tensor operandVid) = operand
     vid <- emitOp "stablehlo.slice" [operandVid] [inType]
@@ -884,17 +911,17 @@ pad :: forall sIn sOut d.
        (KnownShape sIn, KnownShape sOut, KnownDType d)
     => Tensor sIn d
     -> Tensor '[] d   -- ^ padding value (scalar)
-    -> [Int64]        -- ^ edge_padding_low
-    -> [Int64]        -- ^ edge_padding_high
-    -> [Int64]        -- ^ interior_padding
+    -> Vector (Length sIn) Int64   -- ^ edge_padding_low
+    -> Vector (Length sIn) Int64   -- ^ edge_padding_high
+    -> Vector (Length sIn) Int64   -- ^ interior_padding
     -> Builder (Tensor sOut d)
 pad operand paddingValue low high interior = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         padType  = tensorType (Proxy @'[])  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        lowAttr  = AttrRaw $ "edge_padding_low = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> low) <> ">"
-        highAttr = AttrRaw $ "edge_padding_high = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> high) <> ">"
-        intAttr  = AttrRaw $ "interior_padding = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> interior) <> ">"
+        lowAttr  = AttrRaw $ "edge_padding_low = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList low) <> ">"
+        highAttr = AttrRaw $ "edge_padding_high = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList high) <> ">"
+        intAttr  = AttrRaw $ "interior_padding = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList interior) <> ">"
 
     let (Tensor operandVid) = operand
         (Tensor padVid)     = paddingValue
@@ -907,12 +934,12 @@ dynamicSlice :: forall sIn sOut d.
                 (KnownShape sIn, KnownShape sOut, KnownDType d)
              => Tensor sIn d
              -> [Tensor '[] 'I64]   -- ^ start indices (one scalar i64 per dimension)
-             -> [Int64]             -- ^ slice_sizes
+             -> Vector (Length sOut) Int64   -- ^ slice_sizes
              -> Builder (Tensor sOut d)
 dynamicSlice operand startIndices sliceSizes = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        sizesAttr = AttrRaw $ "slice_sizes = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> sliceSizes) <> ">"
+        sizesAttr = AttrRaw $ "slice_sizes = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList sliceSizes) <> ">"
 
     let (Tensor operandVid) = operand
         startVids = tensorValue <$> startIndices
@@ -1222,9 +1249,9 @@ gelu x = do
 -- @reduction = "stablehlo.add"@ and an init value of @0@.
 reduceWindow :: forall sIn sOut d.
                 (KnownShape sIn, KnownShape sOut, KnownDType d)
-             => [Int64]        -- ^ window_dimensions
-             -> [Int64]        -- ^ window_strides
-             -> [[Int64]]      -- ^ padding: [[low, high], ...] per dimension
+             => Vector (Length sIn) Int64        -- ^ window_dimensions
+             -> Vector (Length sIn) Int64        -- ^ window_strides
+             -> Vector (Length sIn) (Int64, Int64) -- ^ padding: (low, high) per dimension
              -> Text           -- ^ reduction op, e.g. "stablehlo.maximum"
              -> Tensor '[] d   -- ^ init value (scalar)
              -> Tensor sIn d   -- ^ input
@@ -1247,12 +1274,12 @@ reduceWindow windowDims strides padding reduction initVal input = do
         emitReturn [tensorValue result] [elemType]
 
     let windowAttr = AttrRaw $ "window_dimensions = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> windowDims) <> ">"
+            <> T.intercalate ", " ((T.pack . show) <$> VS.toList windowDims) <> ">"
         strideAttr = AttrRaw $ "window_strides = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> strides) <> ">"
-        paddingAttr = AttrRaw $ "padding = dense<[["
-            <> T.intercalate "], [" (padPair <$> padding) <> "]]> : tensor<"
-            <> T.pack (show (length padding)) <> "x2xi64>"
+            <> T.intercalate ", " ((T.pack . show) <$> VS.toList strides) <> ">"
+        padStr = "[" <> T.intercalate ", " (padPairV <$> VS.toList padding) <> "]"
+        paddingAttr = AttrRaw $ "padding = dense<" <> padStr <> "> : tensor<"
+            <> T.pack (show (length (shapeVal (Proxy @sIn)))) <> "x2xi64>"
 
     let (Tensor initVid) = initVal
         (Tensor inputVid) = input
@@ -1265,21 +1292,23 @@ reduceWindow windowDims strides padding reduction initVal input = do
             outType
     return (Tensor vid)
   where
-    padPair [l, h] = T.pack (show l) <> ", " <> T.pack (show h)
-    padPair _      = error "reduceWindow: padding must be [[low,high], ...]"
+    padPairV (l, h) = "[" <> T.pack (show l) <> ", " <> T.pack (show h) <> "]"
 
 -- | 2-D max pooling (NHWC).
 maxPool :: forall n h w c oh ow.
            (KnownNat n, KnownNat h, KnownNat w, KnownNat c, KnownNat oh, KnownNat ow)
-        => [Int64]   -- ^ kernel [kh, kw]
-        -> [Int64]   -- ^ stride [sh, sw]
-        -> [[Int64]] -- ^ padding per spatial dim [[pt, pb], [pl, pr]]
+        => V2 Int64   -- ^ kernel [kh, kw]
+        -> V2 Int64   -- ^ stride [sh, sw]
+        -> P2         -- ^ padding per spatial dim [[pt, pb], [pl, pr]]
         -> Tensor '[n, h, w, c] 'F32
         -> Builder (Tensor '[n, oh, ow, c] 'F32)
 maxPool kernel stride padding x = do
-    let windowDims = [1, kernel !! 0, kernel !! 1, 1]
-        strides    = [1, stride !! 0, stride !! 1, 1]
-        fullPadding = [[0, 0], padding !! 0, padding !! 1, [0, 0]]
+    let windowDims = v4 1 (kernel `VS.index` 0) (kernel `VS.index` 1) 1
+        strides    = v4 1 (stride `VS.index` 0) (stride `VS.index` 1) 1
+        fullPadding = v4 (0, 0)
+                         (fst (padding `VS.index` 0), snd (padding `VS.index` 0))
+                         (fst (padding `VS.index` 1), snd (padding `VS.index` 1))
+                         (0, 0)
     -- init value for max: a very negative number
     initVal <- constant @'[] @'F32 (-1.0e30)
     reduceWindow windowDims strides fullPadding "stablehlo.maximum" initVal x
@@ -1290,15 +1319,15 @@ maxPool kernel stride padding x = do
 -- by the input size, kernel, and stride (no padding).
 avgPool :: forall n h w c oh ow.
            (KnownNat n, KnownNat h, KnownNat w, KnownNat c, KnownNat oh, KnownNat ow)
-        => [Int64]   -- ^ kernel [kh, kw]
-        -> [Int64]   -- ^ stride [sh, sw]
+        => V2 Int64   -- ^ kernel [kh, kw]
+        -> V2 Int64   -- ^ stride [sh, sw]
         -> Tensor '[n, h, w, c] 'F32
         -> Builder (Tensor '[n, oh, ow, c] 'F32)
 avgPool kernel stride x = do
-    let windowDims = [1, kernel !! 0, kernel !! 1, 1]
-        strides    = [1, stride !! 0, stride !! 1, 1]
-        fullPadding = replicate 4 [0, 0]
-        windowSize = fromIntegral (product kernel) :: Double
+    let windowDims = v4 1 (kernel `VS.index` 0) (kernel `VS.index` 1) 1
+        strides    = v4 1 (stride `VS.index` 0) (stride `VS.index` 1) 1
+        fullPadding = v4 (0, 0) (0, 0) (0, 0) (0, 0)
+        windowSize = fromIntegral (product (VS.toList kernel)) :: Double
     initVal <- constant @'[] @'F32 0.0
     summed <- reduceWindow windowDims strides fullPadding "stablehlo.add" initVal x
     divisor <- constant @'[] @'F32 windowSize
@@ -1318,8 +1347,8 @@ transposeConvolution :: forall batch h w inCh outCh kh kw oh ow.
                         ( KnownNat batch, KnownNat h, KnownNat w
                         , KnownNat inCh, KnownNat outCh
                         , KnownNat kh, KnownNat kw, KnownNat oh, KnownNat ow )
-                     => [Int64]   -- ^ lhs_dilation (upsample factor), e.g. [1,2,2,1]
-                     -> [[Int64]] -- ^ padding per spatial dim, e.g. [[1,1],[1,1]] for 2x2 kernel
+                     => V2 Int64   -- ^ lhs_dilation (upsample factor), e.g. [2,2]
+                     -> P2         -- ^ padding per spatial dim, e.g. p2 (1,1) (1,1) for 2x2 kernel
                      -> Tensor '[batch, h, w, inCh] 'F32
                      -> Tensor '[kh, kw, outCh, inCh] 'F32
                      -> Builder (Tensor '[batch, oh, ow, outCh] 'F32)
@@ -1328,10 +1357,10 @@ transposeConvolution lhsDilation padding input kernel = do
         inType2 = tensorType (Proxy @'[kh, kw, outCh, inCh]) (Proxy @'F32)
         outType = tensorType (Proxy @'[batch, oh, ow, outCh]) (Proxy @'F32)
         dimNums = "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]"
-        padStr  = "[[" <> T.pack (show (padding !! 0 !! 0)) <> ", " <> T.pack (show (padding !! 0 !! 1)) <> "], ["
-               <> T.pack (show (padding !! 1 !! 0)) <> ", " <> T.pack (show (padding !! 1 !! 1)) <> "]]"
+        padStr  = "[[" <> T.pack (show (fst (padding `VS.index` 0))) <> ", " <> T.pack (show (snd (padding `VS.index` 0))) <> "], ["
+               <> T.pack (show (fst (padding `VS.index` 1))) <> ", " <> T.pack (show (snd (padding `VS.index` 1))) <> "]]"
         window  = "{stride = [1, 1], pad = " <> padStr
-               <> ", lhs_dilate = [" <> T.intercalate ", " ((T.pack . show) <$> drop 1 (take 3 lhsDilation)) <> "]"
+               <> ", lhs_dilate = [" <> T.intercalate ", " ((T.pack . show) <$> VS.toList lhsDilation) <> "]"
                <> ", rhs_dilate = [1, 1]}"
     vid <- emitOp "stablehlo.convolution" [tensorValue input, tensorValue kernel]
             [inType1, inType2]
@@ -1869,7 +1898,7 @@ sumAll = reduceSum
 slice1 :: forall n d. (KnownShape '[n], KnownDType d)
        => Tensor '[n] d -> Int64 -> Builder (Tensor '[] d)
 slice1 vec i = do
-    sliced <- slice @'[n] @'[1] @d vec [i] [i + 1] [1]
+    sliced <- slice @'[n] @'[1] @d vec (v1 i) (v1 (i + 1)) (v1 1)
     reshape @'[1] @'[] sliced
 
 -- | Pack two scalar tensors into a rank-1 tensor of shape @[2]@.
@@ -1933,7 +1962,7 @@ productDim dims (Tensor x) = do
 -- | Split a tensor into @n@ equal parts along dimension @dim@.
 -- The size of @dim@ in the input must be evenly divisible by @n@.
 split :: forall sIn sOut d.
-         (KnownShape sIn, KnownShape sOut, KnownDType d)
+         (KnownShape sIn, KnownShape sOut, KnownDType d, KnownNat (Length sIn))
       => Int64            -- ^ dimension to split along
       -> Int64            -- ^ number of equal splits
       -> Tensor sIn d
@@ -1943,12 +1972,14 @@ split dim n t = do
         rank = length sInShape
         dimSize = fromIntegral (sInShape !! fromIntegral dim) :: Int
         chunkSize = dimSize `div` fromIntegral n
-        stride = replicate rank 1
+        stride = VS.replicate 1
     when (dimSize `mod` fromIntegral n /= 0) $
         error "split: dimension size not evenly divisible by number of splits"
     Prelude.mapM (\i -> do
-        let start = [if j == fromIntegral dim then fromIntegral (i * chunkSize) else 0 | j <- [0..rank-1]]
-            limit = [if j == fromIntegral dim then fromIntegral ((i+1) * chunkSize) else fromIntegral (sInShape !! j) | j <- [0..rank-1]]
+        let startList = [if j == fromIntegral dim then fromIntegral (i * chunkSize) else 0 | j <- [0..rank-1]]
+            limitList = [if j == fromIntegral dim then fromIntegral ((i+1) * chunkSize) else fromIntegral (sInShape !! j) | j <- [0..rank-1]]
+            start = fromJust (VS.fromList startList)
+            limit = fromJust (VS.fromList limitList)
         slice @sIn @sOut @d t start limit stride
         ) [0 .. fromIntegral n - 1]
 
@@ -2008,7 +2039,7 @@ topK k dim t = do
     let start = replicate rank 0
         limit = [if j == fromIntegral dim then fromIntegral k else sShape !! j | j <- [0..rank-1]]
         stride = replicate rank 1
-    slice @s @sOut @d sorted start limit stride
+    slice @s @sOut @d sorted (vecFromListUnsafe @s start) (vecFromListUnsafe @s limit) (vecFromListUnsafe @s stride)
 
 -- ---------------------------------------------------------------------------
 -- Einsum

@@ -40,7 +40,7 @@ tests = testGroup "EndToEnd.Shape"
                 [ FuncArg "arg0" (TensorType [2, 2] F32) ]
                 $ do
                     x <- arg
-                    y <- transpose @'[2, 2] @'[2, 2] [1, 0] x
+                    y <- transpose @'[2, 2] @'[2, 2] (v2 1 0) x
                     return y
         exec <- compile api client (render modu)
         bufIn <- toDeviceF32 api client input2x2 [2, 2]
@@ -52,7 +52,7 @@ tests = testGroup "EndToEnd.Shape"
                 [ FuncArg "arg0" (TensorType [2, 2] F32) ]
                 $ do
                     x <- arg
-                    y <- transpose @'[2, 2] @'[2, 2] [0, 1] x
+                    y <- transpose @'[2, 2] @'[2, 2] (v2 0 1) x
                     return y
         exec <- compile api client (render modu)
         bufIn <- toDeviceF32 api client input2x2 [2, 2]

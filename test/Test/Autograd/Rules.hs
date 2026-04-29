@@ -47,9 +47,9 @@ tests = testGroup "Autograd.Rules"
         assertBool "non-empty module" (not $ T.null text)
     , testCase "vjpReduceWindow (avgPool)" $ do
         let f x = do
-                let windowDims = [1, 2, 2, 1]
-                    strides    = [1, 2, 2, 1]
-                    padding    = replicate 4 [0, 0]
+                let windowDims = v4 1 2 2 1
+                    strides    = v4 1 2 2 1
+                    padding    = v4 (0,0) (0,0) (0,0) (0,0)
                 initVal <- constant @'[] @'F32 0.0
                 y <- reduceWindow windowDims strides padding "stablehlo.add" initVal x
                 divisor <- constant @'[] @'F32 4.0
@@ -72,7 +72,7 @@ tests = testGroup "Autograd.Rules"
     , testCase "vjpTransposeConvolution" $ do
         let f x = do
                 k <- constant @'[2, 2, 1, 1] @'F32 1.0
-                y <- transposeConvolution @1 @2 @2 @1 @1 @2 @2 @3 @3 [1, 2, 2, 1] (replicate 2 [0, 0]) x k
+                y <- transposeConvolution @1 @2 @2 @1 @1 @2 @2 @3 @3 (v2 2 2) (p2 (0,0) (0,0)) x k
                 sumAll y
             modu = gradModule @'[1, 2, 2, 1] @'F32 f
             text = render modu

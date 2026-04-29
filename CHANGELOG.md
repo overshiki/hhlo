@@ -163,3 +163,34 @@ the common compile-and-run workflow:
   reimplement plugin discovery.
 
 ## next
+
+* **Fixed-length configuration vectors** — rank-polymorphic EDSL ops now use
+  `vector-sized` to tie config vector lengths to tensor ranks at compile time.
+  This eliminates the class of bugs where wrong-length config silently produces
+  invalid StableHLO.
+  * Phase 1 (2D NN primitives): `conv2dWithPadding`, `maxPool`, `avgPool`,
+    `transposeConvolution` accept `V2 Int64` / `P2`.
+  * Phase 2+ (rank-polymorphic ops): `transpose`, `slice`, `pad`,
+    `dynamicSlice`, `reduceWindow`, and `dotGeneral` now accept
+    `Vector (Length s) Int64` or separate `Vector n Int64` type parameters
+    instead of raw `[Int64]`.
+  ```haskell
+  -- BEFORE (could silently miscompile)
+  transpose [1, 0] x
+  slice x [1] [3] [1]
+  dotGeneral [] [] [1] [0] x y
+
+  -- AFTER (type-safe)
+  transpose (v2 1 0) x
+  slice x (v1 1) (v1 3) (v1 1)
+  dotGeneral VS.empty VS.empty (v1 1) (v1 0) x y
+  ```
+  New exports in `HHLO.Core.Types`: `Length` type family, `V`, `V1`, `V2`,
+  `V3`, `V4`, `Padding`, `P2`, plus smart constructors `v1`, `v2`, `v3`, `v4`,
+  `p2`.
+* New dependency: `vector-sized >= 1.5 && < 1.6`.
+* Fix `transposeConvolution` lhs_dilation bug — passing a 2-element spatial
+  dilation list no longer drops the second element.
+* `gather` and `scatter` kept as `[Int64]` for now. Their config vector lengths
+  depend on complex relationships between operand / indices / result ranks, so
+  a clean type-safe design requires a separate future phase.

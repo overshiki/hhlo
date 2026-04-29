@@ -6,6 +6,7 @@ module Test.EDSL.Ops where
 
 import Prelude hiding (map, maximum, minimum, negate, compare, tanh, sqrt, sin, cos, tan, floor)
 import qualified Data.Text as T
+import qualified Data.Vector.Sized as VS
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -80,7 +81,7 @@ tests = testGroup "EDSL.Ops"
                     [ FuncArg "arg0" (TensorType [3, 2] F32) ]
                     $ do
                         x <- arg @'[3, 2] @'F32
-                        y <- transpose @'[3, 2] @'[2, 3] [1, 0] x
+                        y <- transpose @'[3, 2] @'[2, 3] (v2 1 0) x
                         return y
             let rendered = render modu
             assertBool "stablehlo.transpose" $ "stablehlo.transpose" `T.isInfixOf` rendered
@@ -147,7 +148,7 @@ tests = testGroup "EDSL.Ops"
                     $ do
                         x <- arg @'[2, 3] @'F32
                         y <- arg @'[3, 2] @'F32
-                        z <- dotGeneral @'[2, 3] @'[3, 2] @'[2, 2] @'F32 [] [] [1] [0] x y
+                        z <- dotGeneral @'[2, 3] @'[3, 2] @'[2, 2] @'F32 VS.empty VS.empty (v1 1) (v1 0) x y
                         return z
             let rendered = render modu
             assertBool "stablehlo.dot_general" $ "stablehlo.dot_general" `T.isInfixOf` rendered
@@ -181,7 +182,7 @@ tests = testGroup "EDSL.Ops"
                     $ do
                         x <- arg @'[1, 4, 4, 1] @'F32
                         initVal <- constant @'[] @'F32 0.0
-                        y <- reduceWindow @'[1, 4, 4, 1] @'[1, 2, 2, 1] [1, 2, 2, 1] [1, 2, 2, 1] [[0, 0], [0, 0], [0, 0], [0, 0]] "stablehlo.add" initVal x
+                        y <- reduceWindow @'[1, 4, 4, 1] @'[1, 2, 2, 1] (v4 1 2 2 1) (v4 1 2 2 1) (v4 (0,0) (0,0) (0,0) (0,0)) "stablehlo.add" initVal x
                         return y
             let rendered = render modu
             assertBool "stablehlo.reduce_window" $ "stablehlo.reduce_window" `T.isInfixOf` rendered
@@ -190,7 +191,7 @@ tests = testGroup "EDSL.Ops"
                     [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
                     $ do
                         x <- arg @'[1, 4, 4, 1] @'F32
-                        y <- maxPool [2, 2] [2, 2] [[0, 0], [0, 0]] x
+                        y <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) x
                         return y
             let rendered = render modu
             assertBool "reduce_window for maxPool" $ "stablehlo.reduce_window" `T.isInfixOf` rendered
@@ -200,7 +201,7 @@ tests = testGroup "EDSL.Ops"
                     [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
                     $ do
                         x <- arg @'[1, 4, 4, 1] @'F32
-                        y <- avgPool [2, 2] [2, 2] x
+                        y <- avgPool (v2 2 2) (v2 2 2) x
                         return y
             let rendered = render modu
             assertBool "reduce_window for avgPool" $ "stablehlo.reduce_window" `T.isInfixOf` rendered
@@ -232,7 +233,7 @@ tests = testGroup "EDSL.Ops"
                     $ do
                         x <- arg @'[1, 4, 4, 1] @'F32
                         k <- constant @'[3, 3, 1, 1] @'F32 0.5
-                        y <- conv2dWithPadding @1 @4 @4 @1 @1 @3 @3 @4 @4 [1, 1] [[1, 1], [1, 1]] x k
+                        y <- conv2dWithPadding @1 @4 @4 @1 @1 @3 @3 @4 @4 (v2 1 1) (p2 (1,1) (1,1)) x k
                         return y
             let rendered = render modu
             assertBool "stablehlo.convolution" $ "stablehlo.convolution" `T.isInfixOf` rendered
@@ -295,7 +296,7 @@ tests = testGroup "EDSL.Ops"
                     $ do
                         x <- arg @'[1, 4, 4, 1] @'F32
                         k <- constant @'[2, 2, 1, 1] @'F32 0.5
-                        y <- transposeConvolution [1, 2, 2, 1] [[1, 1], [1, 1]] x k
+                        y <- transposeConvolution (v2 2 2) (p2 (1,1) (1,1)) x k
                         return y
             let rendered = render modu
             assertBool "stablehlo.convolution" $ "stablehlo.convolution" `T.isInfixOf` rendered
@@ -356,7 +357,7 @@ tests = testGroup "EDSL.Ops"
                     [ FuncArg "arg0" (TensorType [4] F32) ]
                     $ do
                         x <- arg @'[4] @'F32
-                        y <- slice x [1] [3] [1]
+                        y <- slice x (v1 1) (v1 3) (v1 1)
                         return y
             let rendered = render modu
             assertBool "stablehlo.slice" $ "stablehlo.slice" `T.isInfixOf` rendered
@@ -366,7 +367,7 @@ tests = testGroup "EDSL.Ops"
                     $ do
                         x <- arg @'[2] @'F32
                         padVal <- constant @'[] @'F32 0.0
-                        y <- pad x padVal [1] [1] [0]
+                        y <- pad x padVal (v1 1) (v1 1) (v1 0)
                         return y
             let rendered = render modu
             assertBool "stablehlo.pad" $ "stablehlo.pad" `T.isInfixOf` rendered
@@ -376,7 +377,7 @@ tests = testGroup "EDSL.Ops"
                     $ do
                         x <- arg @'[4] @'F32
                         idx <- constant @'[] @'I64 1
-                        y <- dynamicSlice x [idx] [2]
+                        y <- dynamicSlice x [idx] (v1 2)
                         return y
             let rendered = render modu
             assertBool "stablehlo.dynamic_slice" $ "stablehlo.dynamic_slice" `T.isInfixOf` rendered

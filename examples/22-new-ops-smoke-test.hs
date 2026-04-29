@@ -177,7 +177,7 @@ testMaxPool api client = do
             [ FuncArg "x" (TensorType [1, 4, 4, 1] F32) ]
             $ do
                 x <- arg @'[1, 4, 4, 1] @'F32
-                maxPool [2, 2] [2, 2] [[0, 0], [0, 0]] x
+                maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) x
     exec <- compile api client (render modu)
     let input = V.fromList
             [ 1,  2,  3,  4
@@ -197,7 +197,7 @@ testAvgPool api client = do
             [ FuncArg "x" (TensorType [1, 4, 4, 1] F32) ]
             $ do
                 x <- arg @'[1, 4, 4, 1] @'F32
-                avgPool [2, 2] [2, 2] x
+                avgPool (v2 2 2) (v2 2 2) x
     exec <- compile api client (render modu)
     let input = V.fromList
             [ 1,  2,  3,  4

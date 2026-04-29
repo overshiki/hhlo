@@ -5,6 +5,7 @@
 module Test.Runtime.EndToEndMatmul where
 
 import qualified Data.Vector.Storable as V
+import qualified Data.Vector.Sized as VS
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -83,7 +84,7 @@ tests = testGroup "EndToEnd.Matmul"
                 $ do
                     x <- arg @'[1, 2, 3] @'F32
                     y <- arg @'[3, 2] @'F32
-                    z <- dotGeneral @'[1, 2, 3] @'[3, 2] @'[1, 2, 2] @'F32 [] [] [2] [0] x y
+                    z <- dotGeneral VS.empty VS.empty (v1 2) (v1 0) x y
                     return z
         exec <- compile api client (render modu)
         let a = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]

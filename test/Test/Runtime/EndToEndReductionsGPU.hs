@@ -42,7 +42,7 @@ tests getGPU = testGroup "EndToEnd.ReductionsGPU"
                 [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 1] @'F32
-                    y <- maxPool [2, 2] [2, 2] [[0, 0], [0, 0]] x
+                    y <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) x
                     return y
         exec <- compile api client (render modu)
         let inp = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
@@ -57,7 +57,7 @@ tests getGPU = testGroup "EndToEnd.ReductionsGPU"
                 [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 1] @'F32
-                    y <- avgPool [2, 2] [2, 2] x
+                    y <- avgPool (v2 2 2) (v2 2 2) x
                     return y
         exec <- compile api client (render modu)
         let inp = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,

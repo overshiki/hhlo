@@ -55,34 +55,34 @@ main = do
 
                 -- Encoder stage 1: 1 -> 16 channels
                 wE1a <- constant @'[3, 3, 1, 16] @'F32 0.01
-                e1 <- conv2dWithPadding @1 @16 @16 @1 @16 @3 @3 @16 @16 [1, 1] [[1, 1], [1, 1]] x wE1a
+                e1 <- conv2dWithPadding @1 @16 @16 @1 @16 @3 @3 @16 @16 (v2 1 1) (p2 (1,1) (1,1)) x wE1a
                 e1 <- relu e1
                 wE1b <- constant @'[3, 3, 16, 16] @'F32 0.01
-                e1 <- conv2dWithPadding @1 @16 @16 @16 @16 @3 @3 @16 @16 [1, 1] [[1, 1], [1, 1]] e1 wE1b
+                e1 <- conv2dWithPadding @1 @16 @16 @16 @16 @3 @3 @16 @16 (v2 1 1) (p2 (1,1) (1,1)) e1 wE1b
                 e1 <- relu e1
                 -- Skip1 = e1 (shape [1,16,16,16])
 
                 -- Downsample: maxPool 2x2/2
-                d1 <- maxPool [2, 2] [2, 2] [[0, 0], [0, 0]] e1
+                d1 <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) e1
 
                 -- Encoder stage 2: 16 -> 32 channels
                 wE2a <- constant @'[3, 3, 16, 32] @'F32 0.01
-                e2 <- conv2dWithPadding @1 @8 @8 @16 @32 @3 @3 @8 @8 [1, 1] [[1, 1], [1, 1]] d1 wE2a
+                e2 <- conv2dWithPadding @1 @8 @8 @16 @32 @3 @3 @8 @8 (v2 1 1) (p2 (1,1) (1,1)) d1 wE2a
                 e2 <- relu e2
                 wE2b <- constant @'[3, 3, 32, 32] @'F32 0.01
-                e2 <- conv2dWithPadding @1 @8 @8 @32 @32 @3 @3 @8 @8 [1, 1] [[1, 1], [1, 1]] e2 wE2b
+                e2 <- conv2dWithPadding @1 @8 @8 @32 @32 @3 @3 @8 @8 (v2 1 1) (p2 (1,1) (1,1)) e2 wE2b
                 e2 <- relu e2
                 -- Skip2 = e2 (shape [1,8,8,32])
 
                 -- Downsample: maxPool 2x2/2
-                d2 <- maxPool [2, 2] [2, 2] [[0, 0], [0, 0]] e2
+                d2 <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) e2
 
                 -- ========== Bottleneck ==========
                 wBa <- constant @'[3, 3, 32, 64] @'F32 0.01
-                b <- conv2dWithPadding @1 @4 @4 @32 @64 @3 @3 @4 @4 [1, 1] [[1, 1], [1, 1]] d2 wBa
+                b <- conv2dWithPadding @1 @4 @4 @32 @64 @3 @3 @4 @4 (v2 1 1) (p2 (1,1) (1,1)) d2 wBa
                 b <- relu b
                 wBb <- constant @'[3, 3, 64, 64] @'F32 0.01
-                b <- conv2dWithPadding @1 @4 @4 @64 @64 @3 @3 @4 @4 [1, 1] [[1, 1], [1, 1]] b wBb
+                b <- conv2dWithPadding @1 @4 @4 @64 @64 @3 @3 @4 @4 (v2 1 1) (p2 (1,1) (1,1)) b wBb
                 b <- relu b
 
                 -- ========== Decoder ==========
@@ -90,31 +90,31 @@ main = do
                 -- Decoder stage 2: upsample 4x4 -> 8x8, concat with skip2
                 -- Transpose conv: [1,4,4,64] -> [1,8,8,32]
                 wD2up <- constant @'[2, 2, 32, 64] @'F32 0.01
-                u2 <- transposeConvolution [1, 2, 2, 1] [[1, 1], [1, 1]] b wD2up
+                u2 <- transposeConvolution (v2 2 2) (p2 (1,1) (1,1)) b wD2up
                 -- Concatenate with skip2 along channel dim (axis 3)
                 u2 <- concatenate2 @'[1, 8, 8, 32] @'[1, 8, 8, 32] @'[1, 8, 8, 64] @'F32 3 u2 e2
                 wD2a <- constant @'[3, 3, 64, 32] @'F32 0.01
-                u2 <- conv2dWithPadding @1 @8 @8 @64 @32 @3 @3 @8 @8 [1, 1] [[1, 1], [1, 1]] u2 wD2a
+                u2 <- conv2dWithPadding @1 @8 @8 @64 @32 @3 @3 @8 @8 (v2 1 1) (p2 (1,1) (1,1)) u2 wD2a
                 u2 <- relu u2
                 wD2b <- constant @'[3, 3, 32, 32] @'F32 0.01
-                u2 <- conv2dWithPadding @1 @8 @8 @32 @32 @3 @3 @8 @8 [1, 1] [[1, 1], [1, 1]] u2 wD2b
+                u2 <- conv2dWithPadding @1 @8 @8 @32 @32 @3 @3 @8 @8 (v2 1 1) (p2 (1,1) (1,1)) u2 wD2b
                 u2 <- relu u2
 
                 -- Decoder stage 1: upsample 8x8 -> 16x16, concat with skip1
                 wD1up <- constant @'[2, 2, 16, 32] @'F32 0.01
-                u1 <- transposeConvolution [1, 2, 2, 1] [[1, 1], [1, 1]] u2 wD1up
+                u1 <- transposeConvolution (v2 2 2) (p2 (1,1) (1,1)) u2 wD1up
                 -- Concatenate with skip1 along channel dim (axis 3)
                 u1 <- concatenate2 @'[1, 16, 16, 16] @'[1, 16, 16, 16] @'[1, 16, 16, 32] @'F32 3 u1 e1
                 wD1a <- constant @'[3, 3, 32, 16] @'F32 0.01
-                u1 <- conv2dWithPadding @1 @16 @16 @32 @16 @3 @3 @16 @16 [1, 1] [[1, 1], [1, 1]] u1 wD1a
+                u1 <- conv2dWithPadding @1 @16 @16 @32 @16 @3 @3 @16 @16 (v2 1 1) (p2 (1,1) (1,1)) u1 wD1a
                 u1 <- relu u1
                 wD1b <- constant @'[3, 3, 16, 16] @'F32 0.01
-                u1 <- conv2dWithPadding @1 @16 @16 @16 @16 @3 @3 @16 @16 [1, 1] [[1, 1], [1, 1]] u1 wD1b
+                u1 <- conv2dWithPadding @1 @16 @16 @16 @16 @3 @3 @16 @16 (v2 1 1) (p2 (1,1) (1,1)) u1 wD1b
                 u1 <- relu u1
 
                 -- Final 1x1 conv: 16 -> 2 channels
                 wOut <- constant @'[1, 1, 16, 2] @'F32 0.01
-                conv2dWithPadding @1 @16 @16 @16 @2 @1 @1 @16 @16 [1, 1] [[0, 0], [0, 0]] u1 wOut
+                conv2dWithPadding @1 @16 @16 @16 @2 @1 @1 @16 @16 (v2 1 1) (p2 (0,0) (0,0)) u1 wOut
 
     putStrLn "Generated MLIR (first 20 lines):"
     let lines_ = T.lines (render modu)

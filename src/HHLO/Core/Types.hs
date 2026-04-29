@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 {-# LANGUAGE OverloadedStrings #-}
@@ -12,6 +13,20 @@ module HHLO.Core.Types
     , KnownShape(..)
     , dtypeToText
     , HostType
+    -- * Fixed-length configuration vectors
+    , Length
+    , V
+    , V1
+    , V2
+    , V3
+    , V4
+    , Padding
+    , P2
+    , v1
+    , v2
+    , v3
+    , v4
+    , p2
     ) where
 
 import GHC.TypeLits
@@ -20,6 +35,7 @@ import Data.Kind (Type)
 import Data.Int (Int8, Int16, Int32, Int64)
 import Data.Word (Word8, Word16, Word32, Word64)
 import Data.Text (Text)
+import qualified Data.Vector.Sized as VS
 
 
 -- | Supported element types for tensors.
@@ -79,3 +95,53 @@ type family HostType (d :: DType) :: Type where
     HostType 'UI32 = Word32
     HostType 'UI64 = Word64
     HostType 'Bool = Word8
+
+-- ---------------------------------------------------------------------------
+-- Fixed-length configuration vectors
+-- ---------------------------------------------------------------------------
+
+-- | Compute the length of a type-level list.
+type family Length (xs :: [k]) :: Nat where
+    Length '[]     = 0
+    Length (x:xs)  = 1 + Length xs
+
+-- | Fixed-length vector alias.
+type V (n :: Nat) a = VS.Vector n a
+
+-- | 1-element vector.
+type V1 a = V 1 a
+
+-- | 2-element vector (e.g. spatial height, width).
+type V2 a = V 2 a
+
+-- | 3-element vector.
+type V3 a = V 3 a
+
+-- | 4-element vector (e.g. NHWC dimensions).
+type V4 a = V 4 a
+
+-- | Padding config: one (low,high) pair per dimension.
+type Padding (n :: Nat) = V n (Int64, Int64)
+
+-- | 2D padding alias (common case).
+type P2 = Padding 2
+
+-- | Smart constructor for a 1-element vector.
+v1 :: a -> V1 a
+v1 a = a `VS.cons` VS.empty
+
+-- | Smart constructor for a 2-element vector.
+v2 :: a -> a -> V2 a
+v2 a b = a `VS.cons` (b `VS.cons` VS.empty)
+
+-- | Smart constructor for a 3-element vector.
+v3 :: a -> a -> a -> V3 a
+v3 a b c = a `VS.cons` (b `VS.cons` (c `VS.cons` VS.empty))
+
+-- | Smart constructor for a 4-element vector.
+v4 :: a -> a -> a -> a -> V4 a
+v4 a b c d = a `VS.cons` (b `VS.cons` (c `VS.cons` (d `VS.cons` VS.empty)))
+
+-- | Smart constructor for 2D padding from two (before,after) pairs.
+p2 :: (Int64, Int64) -> (Int64, Int64) -> P2
+p2 = v2

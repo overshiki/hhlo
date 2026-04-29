@@ -79,9 +79,9 @@ tests = testGroup "EndToEnd.Autograd"
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     , testCase "grad avgPool" $ withPJRTCPU $ \api client -> do
         let f x = do
-                let windowDims = [1, 2, 2, 1]
-                    strides    = [1, 2, 2, 1]
-                    padding    = replicate 4 [0, 0]
+                let windowDims = v4 1 2 2 1
+                    strides    = v4 1 2 2 1
+                    padding    = v4 (0, 0) (0, 0) (0, 0) (0, 0)
                 initVal <- constant @'[] @'F32 0.0
                 y <- reduceWindow windowDims strides padding "stablehlo.add" initVal x
                 divisor <- constant @'[] @'F32 4.0
@@ -116,9 +116,9 @@ tests = testGroup "EndToEnd.Autograd"
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     , testCase "grad maxPool" $ withPJRTCPU $ \api client -> do
         let f x = do
-                let kernel = [2, 2]
-                    stride = [2, 2]
-                    padding = [[0, 0], [0, 0]]
+                let kernel = v2 2 2
+                    stride = v2 2 2
+                    padding = p2 (0,0) (0,0)
                 y <- maxPool @1 @4 @4 @1 @2 @2 kernel stride padding x
                 sumAll y
             gradModu = gradModule @'[1, 4, 4, 1] @'F32 f
