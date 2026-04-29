@@ -36,7 +36,8 @@ import HHLO.Autograd.Grad
 -- >     deriving (Generic)
 -- > instance ParamTree MLPParams
 --
--- Only flat records where every field is a 'Tensor' are supported.
+-- Flat records and nested records (where fields are themselves 'ParamTree'
+-- instances) are both supported.
 class ParamTree a where
     -- | Total number of scalar elements across all tensors.
     paramSize :: Proxy a -> Int
@@ -97,8 +98,9 @@ class GParamTree f where
     gParamPack :: f p -> Builder [BTensor]
     gParamUnpackFrom :: BTensor -> Int -> Builder (f p, Int)
 
--- Leaf: a single Tensor field.
-instance (KnownShape s, KnownDType d) => GParamTree (K1 R (Tensor s d)) where
+-- Leaf: a single Tensor field.  Marked OVERLAPPING so the more general
+-- 'ParamTree a' instance below does not conflict with it.
+instance {-# OVERLAPPING #-} (KnownShape s, KnownDType d) => GParamTree (K1 R (Tensor s d)) where
     gParamSize _ = fromIntegral $ product $ shapeVal (Proxy @s)
     gParamDType _ = dtypeVal (Proxy @d)
     gParamPack (K1 tensor) = do
@@ -134,6 +136,24 @@ instance (GParamTree f, GParamTree g) => GParamTree (f :*: g) where
         (f, off') <- gParamUnpackFrom bt off
         (g, off'') <- gParamUnpackFrom bt off'
         return (f :*: g, off'')
+
+-- Leaf: any nested record that itself has a 'ParamTree' instance.
+-- This enables arbitrarily nested parameter trees.
+instance {-# OVERLAPPABLE #-} ParamTree a => GParamTree (K1 R a) where
+    gParamSize _ = paramSize (Proxy @a)
+    gParamDType _ = paramDType (Proxy @a)
+    gParamPack (K1 x) = do
+        bt <- paramPack x
+        return [bt]
+    gParamUnpackFrom flatBt offset = do
+        let sizeI = paramSize (Proxy @a)
+            sizeI64 = fromIntegral sizeI :: Integer
+            size64 = fromIntegral sizeI :: Int64
+            dt = paramDType (Proxy @a)
+            sliceType = TensorType [sizeI64] dt
+        sliceBt <- bslice flatBt [fromIntegral offset] [fromIntegral offset + size64] [1] sliceType
+        unpacked <- paramUnpack sliceBt
+        return (K1 unpacked, offset + sizeI)
 
 -- Unit: no fields.
 instance GParamTree U1 where

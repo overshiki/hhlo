@@ -157,6 +157,52 @@ tests = testGroup "EndToEnd.Autograd"
         let expected = V.fromList [3.0, 4.0, 1.0, 2.0]
         assertBool "grad2 close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "gradWithParams nested" $ withPJRTCPU $ \api client -> do
+        let loss :: ModelParams -> Tensor '[2] 'F32 -> Builder (Tensor '[] 'F32)
+            loss p x = do
+                y1a <- multiply x (lw (layer1 p))
+                y1 <- add y1a (lb (layer1 p))
+                y2a <- multiply x (lw (layer2 p))
+                y2 <- add y2a (lb (layer2 p))
+                ysum <- add y1 y2
+                sumAll ysum
+            modu = moduleFromBuilder @'[8] @'F32 "main"
+                [ FuncArg "arg0" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                , FuncArg "arg1" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                , FuncArg "arg2" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                , FuncArg "arg3" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                , FuncArg "arg4" (tensorType (Proxy @'[2]) (Proxy @'F32))
+                ] $ do
+                    l1w <- arg @'[2] @'F32
+                    l1b <- arg @'[2] @'F32
+                    l2w <- arg @'[2] @'F32
+                    l2b <- arg @'[2] @'F32
+                    xIn <- arg @'[2] @'F32
+                    let params = ModelParams (LayerParams l1w l1b) (LayerParams l2w l2b)
+                    grads <- gradWithParams loss params xIn
+                    packed <- paramPack grads
+                    return (btoTyped @'[8] @'F32 packed)
+        exec <- compile api client (render modu)
+        let l1wVal = V.fromList [1.0, 1.0]
+            l1bVal = V.fromList [0.0, 0.0]
+            l2wVal = V.fromList [1.0, 1.0]
+            l2bVal = V.fromList [0.0, 0.0]
+            xVal   = V.fromList [3.0, 4.0]
+        bufL1W <- toDeviceF32 api client l1wVal [2]
+        bufL1B <- toDeviceF32 api client l1bVal [2]
+        bufL2W <- toDeviceF32 api client l2wVal [2]
+        bufL2B <- toDeviceF32 api client l2bVal [2]
+        bufX   <- toDeviceF32 api client xVal [2]
+        [bufOut] <- execute api exec [bufL1W, bufL1B, bufL2W, bufL2B, bufX]
+        result <- fromDeviceF32 api bufOut 8
+        -- y = (x*l1w + l1b) + (x*l2w + l2b)
+        -- dl1w = x = [3, 4]
+        -- dl1b = [1, 1]
+        -- dl2w = x = [3, 4]
+        -- dl2b = [1, 1]
+        let expected = V.fromList [3.0, 4.0, 1.0, 1.0, 3.0, 4.0, 1.0, 1.0]
+        assertBool "gradWithParams nested close" $
+            V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     , testCase "gradWithParams" $ withPJRTCPU $ \api client -> do
         let loss :: MLPParams -> Tensor '[2] 'F32 -> Builder (Tensor '[] 'F32)
             loss p x = do
@@ -192,6 +238,20 @@ tests = testGroup "EndToEnd.Autograd"
         assertBool "gradWithParams close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     ]
+
+data LayerParams = LayerParams
+    { lw :: Tensor '[2] 'F32
+    , lb :: Tensor '[2] 'F32
+    } deriving (Generic)
+
+instance ParamTree LayerParams
+
+data ModelParams = ModelParams
+    { layer1 :: LayerParams
+    , layer2 :: LayerParams
+    } deriving (Generic)
+
+instance ParamTree ModelParams
 
 data MLPParams = MLPParams
     { w :: Tensor '[2] 'F32

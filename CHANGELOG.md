@@ -127,3 +127,20 @@ the common compile-and-run workflow:
   autograd (`grad`/`grad2`/`grad3`/ParamTree), control flow, async execution,
   and a deep-dive into the architecture and PJRT pipeline.
 * Test count: 190 CPU tests + 6 GPU integration tests.
+
+## next
+
+* **Nested ParamTree** — `ParamTree` now supports arbitrarily nested records
+  via an overlapping `GParamTree (K1 R a)` instance. Fields can be other
+  `ParamTree` records, not just bare `Tensor`s.
+  ```haskell
+  data LayerParams = LayerParams { w :: Tensor '[2] 'F32, b :: Tensor '[2] 'F32 }
+      deriving (Generic)
+  instance ParamTree LayerParams
+
+  data ModelParams = ModelParams { layer1 :: LayerParams, layer2 :: LayerParams }
+      deriving (Generic)
+  instance ParamTree ModelParams
+  ```
+* New E2E autograd test: `gradWithParams nested`.
+* Test count: 191 CPU tests + 6 GPU integration tests.
