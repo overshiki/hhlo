@@ -128,7 +128,7 @@ the common compile-and-run workflow:
   and a deep-dive into the architecture and PJRT pipeline.
 * Test count: 190 CPU tests + 6 GPU integration tests.
 
-## next
+## 0.8.0.0 -- 2026-04-29
 
 * **Nested ParamTree** — `ParamTree` now supports arbitrarily nested records
   via an overlapping `GParamTree (K1 R a)` instance. Fields can be other
@@ -161,3 +161,5 @@ the common compile-and-run workflow:
   `HHLO_PJRT_CPU_PLUGIN` / `HHLO_PJRT_GPU_PLUGIN` environment variables
   (falling back to `deps/pjrt/`), so downstream libraries no longer need to
   reimplement plugin discovery.
+
+## next
