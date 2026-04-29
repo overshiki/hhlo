@@ -50,16 +50,13 @@ import qualified Data.Text as T
 import qualified Data.Vector.Storable as V
 import Foreign.C (CInt)
 import GHC.TypeLits
-import Data.Char (toUpper)
-import System.Environment (lookupEnv)
-import System.Directory (doesFileExist)
 import System.IO.Unsafe (unsafePerformIO)
 
 import HHLO.Core.Types
 import HHLO.IR.AST (Module)
 import HHLO.IR.Builder (KnownDType(..))
 import HHLO.IR.Pretty (render)
-import HHLO.Runtime.PJRT.Plugin (withPJRT)
+import HHLO.Runtime.PJRT.Plugin (withPJRT, getPluginPath)
 import HHLO.Runtime.PJRT.Types
 import HHLO.Runtime.Compile (CompileOptions(..), defaultCompileOptions, compileWithOptions)
 import HHLO.Runtime.Execute (execute)
@@ -116,28 +113,6 @@ isCpuDevice :: PJRTApi -> PJRTDevice -> Bool
 isCpuDevice api dev = unsafePerformIO $ do
     kind <- Dev.deviceKind api dev
     return $ map (\c -> if c >= 'A' && c <= 'Z' then toEnum (fromEnum c + 32) else c) kind == "cpu"
-
--- | Search for a PJRT plugin.
--- Priority: 1) HHLO_PJRT_<PLATFORM>_PLUGIN env var, 2) deps/pjrt/<lib>, 3) error.
-getPluginPath :: String -> FilePath -> IO FilePath
-getPluginPath platform defaultName = do
-    mEnv <- lookupEnv ("HHLO_PJRT_" ++ map toUpper platform ++ "_PLUGIN")
-    case mEnv of
-        Just p  -> return p
-        Nothing -> do
-            let defaultPath = "deps/pjrt/" ++ defaultName
-            exists <- doesFileExist defaultPath
-            if exists
-                then return defaultPath
-                else error $ unlines
-                    [ "PJRT " ++ platform ++ " plugin not found at: " ++ defaultPath
-                    , ""
-                    , "To fix this, either:"
-                    , "  1. Run the download script:"
-                    , "       ./pjrt_script.sh"
-                    , "  2. Set the environment variable:"
-                    , "       export HHLO_PJRT_" ++ map toUpper platform ++ "_PLUGIN=/path/to/" ++ defaultName
-                    ]
 
 -- ---------------------------------------------------------------------------
 -- Compilation

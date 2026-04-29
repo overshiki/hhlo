@@ -4,12 +4,17 @@ module HHLO.Runtime.PJRT.Plugin
     ( withPJRT
     , withPJRTCPU
     , withPJRTGPU
+    , getPluginPath
     ) where
 
 import Foreign.C
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr
 import Foreign.Storable (peek)
+
+import Data.Char (toUpper)
+import System.Directory (doesFileExist)
+import System.Environment (lookupEnv)
 
 import HHLO.Runtime.PJRT.FFI
 import HHLO.Runtime.PJRT.Types
@@ -37,12 +42,46 @@ withPJRT pluginPath action = do
     return result
 
 -- | Convenience wrapper for the CPU PJRT plugin.
+--
+-- The plugin path is resolved via 'getPluginPath'.
 withPJRTCPU :: (PJRTApi -> PJRTClient -> IO a) -> IO a
-withPJRTCPU = withPJRT "deps/pjrt/libpjrt_cpu.so"
+withPJRTCPU action = do
+    path <- getPluginPath "cpu" "libpjrt_cpu.so"
+    withPJRT path action
 
 -- | Convenience wrapper for the CUDA PJRT plugin.
+--
+-- The plugin path is resolved via 'getPluginPath'.
 withPJRTGPU :: (PJRTApi -> PJRTClient -> IO a) -> IO a
-withPJRTGPU = withPJRT "deps/pjrt/libpjrt_cuda.so"
+withPJRTGPU action = do
+    path <- getPluginPath "gpu" "libpjrt_cuda.so"
+    withPJRT path action
+
+-- | Search for a PJRT plugin.
+--
+-- Priority:
+--   1. @HHLO_PJRT_<PLATFORM>_PLUGIN@ environment variable
+--   2. @deps/pjrt/<defaultName>@ (downloaded by @pjrt_script.sh@)
+--   3. Runtime error with instructions
+getPluginPath :: String -> FilePath -> IO FilePath
+getPluginPath platform defaultName = do
+    mEnv <- lookupEnv ("HHLO_PJRT_" ++ map toUpper platform ++ "_PLUGIN")
+    case mEnv of
+        Just p  -> return p
+        Nothing -> do
+            let defaultPath = "deps/pjrt/" ++ defaultName
+            exists <- doesFileExist defaultPath
+            if exists
+                then return defaultPath
+                else error $ unlines
+                    [ "PJRT " ++ platform ++ " plugin not found at: " ++ defaultPath
+                    , ""
+                    , "To fix this, either:"
+                    , "  1. Run the download script:"
+                    , "       ./pjrt_script.sh"
+                    , "  2. Set the environment variable:"
+                    , "       export HHLO_PJRT_" ++ map toUpper platform ++ "_PLUGIN=/path/to/" ++ defaultName
+                    ]
 
 unApi :: PJRTApi -> Ptr PJRTApi
 unApi (PJRTApi p) = p

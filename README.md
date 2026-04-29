@@ -279,6 +279,12 @@ normal   <- rngNormal            -- standard normal (mean 0, std 1)
 
 This fetches `libpjrt_cpu.so` into `deps/pjrt/`. If you have an NVIDIA GPU, the CUDA plugin is also downloaded automatically.
 
+You can also point HHLO to an existing PJRT plugin via environment variables:
+```bash
+export HHLO_PJRT_CPU_PLUGIN=/path/to/libpjrt_cpu.so
+export HHLO_PJRT_GPU_PLUGIN=/path/to/libpjrt_cuda.so
+```
+
 ### 2. Build
 
 ```bash
@@ -456,7 +462,7 @@ cabal run example-gpu-matmul-bench --flag=examples
 │       │   ├── FFI.hs      # C FFI declarations
 │       │   ├── Types.hs    # Opaque pointer newtypes + buffer type constants
 │       │   ├── Error.hs    # PJRT error handling
-│       │   └── Plugin.hs   # Backend-agnostic plugin loading (withPJRT)
+│       │   └── Plugin.hs   # Plugin loading + discovery (withPJRT, getPluginPath)
 │       ├── Device.hs       # Device enumeration & selection
 │       ├── Compile.hs      # MLIR → PJRT executable (with CompileOptions)
 │       ├── Execute.hs      # Synchronous + device-targeted + multi-GPU replica execution

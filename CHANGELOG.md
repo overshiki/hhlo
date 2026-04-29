@@ -156,3 +156,8 @@ the common compile-and-run workflow:
 * Fixed `CUDA_ERROR_OUT_OF_MEMORY` warnings during GPU tests by converting
   `SessionGPU` tests to reuse the shared PJRT client (was creating 4 separate
   clients via `withGPU`, each contending for the same GPU memory).
+* Moved `getPluginPath` from `HHLO.Session` to `HHLO.Runtime.PJRT.Plugin`.
+  `withPJRTCPU` and `withPJRTGPU` now resolve plugin paths via the
+  `HHLO_PJRT_CPU_PLUGIN` / `HHLO_PJRT_GPU_PLUGIN` environment variables
+  (falling back to `deps/pjrt/`), so downstream libraries no longer need to
+  reimplement plugin discovery.
