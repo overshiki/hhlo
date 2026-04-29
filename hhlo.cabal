@@ -508,10 +508,20 @@ test-suite hhlo-test
         Test.Runtime.Async
         Test.Runtime.Errors
         Test.Utils
+        Test.Runtime.GPUResource
         Test.Runtime.EndToEndGPU
         Test.Runtime.BufferGPU
         Test.Runtime.AsyncGPU
         Test.Runtime.MultiGPU
+        Test.Runtime.EndToEndArithmeticGPU
+        Test.Runtime.EndToEndShapeGPU
+        Test.Runtime.EndToEndMatmulGPU
+        Test.Runtime.EndToEndNNGPU
+        Test.Runtime.EndToEndReductionsGPU
+        Test.Runtime.EndToEndDataMovementGPU
+        Test.Runtime.EndToEndMultiValueGPU
+        Test.Runtime.EndToEndAutogradGPU
+        Test.Runtime.EndToEndSessionGPU
     build-depends:
         base          >= 4.18.2 && < 5,
         hhlo,

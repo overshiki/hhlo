@@ -23,6 +23,7 @@ module HHLO.Session
     , withCPU
     , withGPU
     , withGPUDevice
+    , sessionFrom
       -- * Compilation
     , Compiled
     , compile
@@ -104,6 +105,12 @@ withGPUDevice idx action = do
             error $ "GPU device index " ++ show idx ++ " out of range ("
                  ++ show (length gpuDevs) ++ " GPUs available)"
         action (Session api client (gpuDevs !! idx))
+
+-- | Construct a 'Session' from an existing PJRT API, client, and device.
+-- This is useful when you already manage the plugin lifecycle externally
+-- (e.g. in a test harness that shares one client across many tests).
+sessionFrom :: PJRTApi -> PJRTClient -> PJRTDevice -> Session
+sessionFrom = Session
 
 isCpuDevice :: PJRTApi -> PJRTDevice -> Bool
 isCpuDevice api dev = unsafePerformIO $ do

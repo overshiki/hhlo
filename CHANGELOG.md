@@ -143,4 +143,16 @@ the common compile-and-run workflow:
   instance ParamTree ModelParams
   ```
 * New E2E autograd test: `gradWithParams nested`.
-* Test count: 191 CPU tests + 6 GPU integration tests.
+* Massive GPU test expansion — from 6 to 82 GPU integration tests.
+  * New shared GPU test harness (`Test.Runtime.GPUResource`) using `tasty`
+    `withResource` for a single PJRT client shared across all GPU tests.
+  * GPU counterparts for nearly all CPU EndToEnd test categories:
+    Arithmetic (15), Shape (8), Matmul (6), NN (7), Reductions (5),
+    DataMovement (15), MultiValue (6), Autograd (10), Session (4).
+  * New typed GPU helpers: `toDeviceF32On`, `toDevicePredOn`, `toDeviceS64On`.
+  * Total: 191 CPU tests + 82 GPU tests = 273 tests.
+* New `sessionFrom` constructor in `HHLO.Session` — create a `Session` from an
+  existing PJRT API/client/device without loading a new plugin.
+* Fixed `CUDA_ERROR_OUT_OF_MEMORY` warnings during GPU tests by converting
+  `SessionGPU` tests to reuse the shared PJRT client (was creating 4 separate
+  clients via `withGPU`, each contending for the same GPU memory).

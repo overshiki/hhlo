@@ -2,6 +2,7 @@ module Main (main) where
 
 import System.Environment (lookupEnv)
 import Test.Tasty
+
 import qualified Test.IR.Pretty as Pretty
 import qualified Test.IR.Builder as Builder
 import qualified Test.EDSL.Ops as EDSLOps
@@ -20,39 +21,65 @@ import qualified Test.Runtime.EndToEndAutograd as Autograd
 import qualified Test.Runtime.Buffer as Buffer
 import qualified Test.Runtime.Async as Async
 import qualified Test.Runtime.Errors as Errors
+
+import Test.Runtime.GPUResource (acquireGPU, releaseGPU)
 import qualified Test.Runtime.EndToEndGPU as EndToEndGPU
 import qualified Test.Runtime.BufferGPU as BufferGPU
 import qualified Test.Runtime.AsyncGPU as AsyncGPU
 import qualified Test.Runtime.MultiGPU as MultiGPU
+import qualified Test.Runtime.EndToEndArithmeticGPU as ArithGPU
+import qualified Test.Runtime.EndToEndShapeGPU as ShapeGPU
+import qualified Test.Runtime.EndToEndMatmulGPU as MatmulGPU
+import qualified Test.Runtime.EndToEndNNGPU as NNGPU
+import qualified Test.Runtime.EndToEndReductionsGPU as ReductionsGPU
+import qualified Test.Runtime.EndToEndDataMovementGPU as DataMovementGPU
+import qualified Test.Runtime.EndToEndMultiValueGPU as MultiValueGPU
+import qualified Test.Runtime.EndToEndAutogradGPU as AutogradGPU
+import qualified Test.Runtime.EndToEndSessionGPU as SessionGPU
+
+cpuTests :: [TestTree]
+cpuTests =
+    [ Pretty.tests
+    , Builder.tests
+    , EDSLOps.tests
+    , AutogradGrad.tests
+    , AutogradRules.tests
+    , EndToEnd.tests
+    , Arith.tests
+    , Shape.tests
+    , Matmul.tests
+    , NN.tests
+    , Reductions.tests
+    , DataMovement.tests
+    , MultiValue.tests
+    , Session.tests
+    , Autograd.tests
+    , Buffer.tests
+    , Async.tests
+    , Errors.tests
+    ]
 
 main :: IO ()
 main = do
     mGpu <- lookupEnv "HHLO_TEST_GPU"
-    let gpuTests = case mGpu of
-            Just "1" ->
-                [ EndToEndGPU.tests
-                , BufferGPU.tests
-                , AsyncGPU.tests
-                , MultiGPU.tests
-                ]
-            _ -> []
-    defaultMain $ testGroup "HHLO Tests" $
-        [ Pretty.tests
-        , Builder.tests
-        , EDSLOps.tests
-        , AutogradGrad.tests
-        , AutogradRules.tests
-        , EndToEnd.tests
-        , Arith.tests
-        , Shape.tests
-        , Matmul.tests
-        , NN.tests
-        , Reductions.tests
-        , DataMovement.tests
-        , MultiValue.tests
-        , Session.tests
-        , Autograd.tests
-        , Buffer.tests
-        , Async.tests
-        , Errors.tests
-        ] ++ gpuTests
+    case mGpu of
+        Just "1" ->
+            defaultMain $ withResource acquireGPU releaseGPU $ \getGPU ->
+                testGroup "HHLO Tests" $ cpuTests ++
+                    [ testGroup "GPU"
+                        [ EndToEndGPU.tests getGPU
+                        , BufferGPU.tests getGPU
+                        , AsyncGPU.tests getGPU
+                        , MultiGPU.tests getGPU
+                        , ArithGPU.tests getGPU
+                        , ShapeGPU.tests getGPU
+                        , MatmulGPU.tests getGPU
+                        , NNGPU.tests getGPU
+                        , ReductionsGPU.tests getGPU
+                        , DataMovementGPU.tests getGPU
+                        , MultiValueGPU.tests getGPU
+                        , AutogradGPU.tests getGPU
+                        , SessionGPU.tests getGPU
+                        ]
+                    ]
+        _ -> defaultMain $ testGroup "HHLO Tests" cpuTests

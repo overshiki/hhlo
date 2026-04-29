@@ -298,8 +298,13 @@ cabal run example-autograd-basic --flag=examples
 ### 4. Run tests
 
 ```bash
-cabal test                    # 190 CPU tests
-cabal test --test-options="-t HHLO+GPU"   # + 6 GPU integration tests
+cabal test                    # 191 CPU tests
+```
+
+GPU tests are **opt-in** via the `HHLO_TEST_GPU` environment variable (they require an NVIDIA GPU and the PJRT CUDA plugin):
+
+```bash
+HHLO_TEST_GPU=1 cabal test    # 191 CPU + 82 GPU tests = 273 total
 ```
 
 ---
