@@ -114,6 +114,45 @@ tests = testGroup "EndToEnd.Autograd"
         let expected = V.fromList [1, 2, 1, 2, 4, 2, 1, 2, 1]
         assertBool "conv2d grad close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "grad slice stride" $ withPJRTCPU $ \api client -> do
+        let f x = do
+                y <- slice @'[5] @'[3] x (v1 0) (v1 5) (v1 2)
+                sumAll y
+            gradModu = gradModule @'[5] @'F32 f
+        exec <- compile api client (render gradModu)
+        let inp = V.fromList [1.0, 2.0, 3.0, 4.0, 5.0]
+        bufIn <- toDeviceF32 api client inp [5]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 5
+        -- grad of sum(slice(x, [0:5:2])) = [1, 0, 1, 0, 1]
+        let expected = V.fromList [1.0, 0.0, 1.0, 0.0, 1.0]
+        result @?= expected
+    , testCase "grad conv2d stride" $ withPJRTCPU $ \api client -> do
+        let f x = do
+                k <- constant @'[3, 3, 1, 1] @'F32 1.0
+                y <- conv2dWithPadding @1 @4 @4 @1 @1 @3 @3 @2 @2 (v2 2 2) (p2 (1,1) (1,1)) x k
+                sumAll y
+            gradModu = gradModule @'[1, 4, 4, 1] @'F32 f
+        exec <- compile api client (render gradModu)
+        let inp = V.fromList [1.0..16.0]
+        bufIn <- toDeviceF32 api client inp [1, 4, 4, 1]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 16
+        -- grad should be non-zero and finite (shape validation is the main goal)
+        assertBool "grad non-zero" $ V.sum result > 0
+    , testCase "grad transposeConvolution asymmetric pad" $ withPJRTCPU $ \api client -> do
+        let f x = do
+                k <- constant @'[3, 3, 1, 1] @'F32 1.0
+                y <- transposeConvolution @1 @2 @2 @1 @1 @3 @3 @2 @2 (v2 2 2) (p2 (1,0) (1,0)) x k
+                sumAll y
+            gradModu = gradModule @'[1, 2, 2, 1] @'F32 f
+        exec <- compile api client (render gradModu)
+        let inp = V.fromList [1.0, 2.0, 3.0, 4.0]
+        bufIn <- toDeviceF32 api client inp [1, 2, 2, 1]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 4
+        -- grad should be non-zero and finite (shape validation is the main goal)
+        assertBool "grad non-zero" $ V.sum result > 0
     , testCase "grad maxPool" $ withPJRTCPU $ \api client -> do
         let f x = do
                 let kernel = v2 2 2
@@ -135,6 +174,20 @@ tests = testGroup "EndToEnd.Autograd"
         let expected = V.fromList [0,0,0,0, 0,1,0,1, 0,0,0,0, 0,1,0,1]
         assertBool "maxPool grad close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "grad pad interior" $ withPJRTCPU $ \api client -> do
+        let f x = do
+                padVal <- constant @'[] @'F32 0.0
+                y <- pad @'[2] @'[3] x padVal (v1 0) (v1 0) (v1 1)
+                sumAll y
+            gradModu = gradModule @'[2] @'F32 f
+        exec <- compile api client (render gradModu)
+        let inp = V.fromList [1.0, 2.0]
+        bufIn <- toDeviceF32 api client inp [2]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 2
+        -- grad of sumAll(pad(x, interior=1)) = [1, 1]
+        let expected = V.fromList [1.0, 1.0]
+        result @?= expected
     , testCase "grad concatenate2" $ withPJRTCPU $ \api client -> do
         let f a b = do
                 c <- concatenate2 @'[2, 4] @'[2, 4] @'[2, 8] @'F32 1 a b

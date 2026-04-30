@@ -7,7 +7,7 @@ module HHLO.Autograd.Rules
     ) where
 
 import Data.Int (Int64)
-import Data.List (sortOn)
+import Data.List (sortOn, zipWith4)
 import Data.Maybe (isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -412,7 +412,12 @@ vjpSlice op resultBars cmap = case getResultBar resultBars of
                 let start' = map fromIntegral start :: [Integer]
                     limit' = map fromIntegral limit :: [Integer]
                     stride' = map fromIntegral stride :: [Integer]
-                    high' = map fromIntegral (zipWith (-) xShape (zipWith (+) start' (zipWith (*) (zipWith (-) limit' start') stride'))) :: [Int64]
+                    -- Number of elements in the sliced bar per dimension:
+                    -- n = ceil((limit - start) / stride)
+                    n = zipWith3 (\l s st -> (l - s + st - 1) `div` st) limit' start' stride' :: [Integer]
+                    -- Padded size = start + n * stride - stride + 1 + high = xShape
+                    -- => high = xShape - start - n * stride + stride - 1
+                    high' = zipWith3 (\x (s, st) n_ -> fromIntegral (x - s - n_ * st + st - 1)) xShape (zip start' stride') n :: [Int64]
                     interior = map (\s -> max 0 (s - 1)) stride :: [Int64]
                     zeroType = TensorType [] (ttDType xType)
                 zero <- bconstant zeroType 0.0
@@ -490,7 +495,7 @@ vjpPad op resultBars cmap = case getResultBar resultBars of
         (low, _high, interior) <- parsePadAttrs (opAttributes op)
         let xShape = ttShape xType
             stride = map (+ 1) interior :: [Int64]
-            limit = zipWith3 (\l s sz -> l + sz * s) low stride (map fromIntegral xShape) :: [Int64]
+            limit = zipWith3 (\l s sz -> l + (sz - 1) * s + 1) low stride (map fromIntegral xShape) :: [Int64]
         dx <- bslice bar low limit stride xType
         accumulate cmap xVid dx
     Nothing -> return cmap
@@ -784,7 +789,24 @@ convBackwardInput bar kernel kernelType inputType stride pad = do
     -- Window attributes only apply to spatial dims (first 2 of kernel shape).
     let spatialKernelShape = take 2 (ttShape kernelType)
         spatialReversePad = reversePad pad stride spatialKernelShape
-        windowStr = buildWindowString [1, 1] spatialReversePad stride [1, 1]
+        -- When stride == 1, the backward is a regular conv (lhs_dilate=1).
+        -- When stride > 1, the backward is a transpose conv; we must adjust
+        -- padding because XLA forward conv uses floor division.
+        adjustedPad = if all (== 1) stride
+            then spatialReversePad
+            else
+                let barShape = ttShape (btType bar)
+                    inputShape = ttShape inputType
+                    spatialBar = take 2 (tail barShape)
+                    spatialInput = take 2 (tail inputShape)
+                    strideInt = map fromIntegral stride :: [Integer]
+                    targetPadTotal = zipWith4 (\inp bar_ stride_ k -> inp - (bar_ - 1) * stride_ + k - 2) (map fromIntegral spatialInput :: [Integer]) (map fromIntegral spatialBar :: [Integer]) strideInt (map fromIntegral spatialKernelShape :: [Integer])
+                    actualPadTotal = map (fromIntegral . sum) spatialReversePad :: [Integer]
+                    padDiffs = map fromIntegral (zipWith (-) targetPadTotal actualPadTotal) :: [Int64]
+                in zipWith (\[l, h] d ->
+                    let h' = h + d
+                    in if h' >= 0 then [l, h'] else [l + h', 0]) spatialReversePad padDiffs
+        windowStr = buildWindowString [1, 1] adjustedPad stride [1, 1]
     bconvolution bar flippedKernel "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] inputType
 
 convBackwardKernel :: BTensor -> TensorType -> BTensor -> [Int64] -> [[Int64]] -> Builder BTensor
@@ -812,7 +834,10 @@ convBackwardKernel input inputType bar stride pad = do
 transposeConvBackwardInput :: BTensor -> BTensor -> TensorType -> [Int64] -> [[Int64]] -> Builder BTensor
 transposeConvBackwardInput bar kernel inputType lhsDilate pad = do
     -- Backward input: conv(dy, kernel) with stride = lhs_dilate.
-    let windowStr = buildWindowString lhsDilate pad [1, 1] [1, 1]
+    -- Padding must be reversed for the backward regular conv.
+    let spatialKernelShape = take 2 (ttShape (btType kernel))
+        spatialReversePad = reversePad pad lhsDilate spatialKernelShape
+        windowStr = buildWindowString lhsDilate spatialReversePad [1, 1] [1, 1]
     bconvolution bar kernel "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] inputType
 
 transposeConvBackwardKernel :: BTensor -> TensorType -> BTensor -> [Int64] -> [[Int64]] -> Builder BTensor

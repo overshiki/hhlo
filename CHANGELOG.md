@@ -197,6 +197,16 @@ the common compile-and-run workflow:
   cumulative `offset` in `start_indices` for all operands after the first.
   Previously only `limit_indices` used the offset, causing PJRT to reject
   gradient modules for any `concatenate2` with 2+ operands.
+* Fix three autograd padding bugs:
+  1. `transposeConvBackwardInput` — now applies `reversePad` so backward
+     regular conv uses reversed padding instead of forward padding directly.
+  2. `convBackwardInput` with `stride > 1` — now computes correct
+     `targetPadTotal = input - (bar-1)*stride + kernel - 2` and adjusts
+     reverse-pad to account for XLA floor division, restoring the original
+     input spatial size in the transpose-conv backward pass.
+  3. `vjpSlice` with `stride > 1` — `high'` padding now uses
+     `n = ceil((limit-start)/stride)` instead of raw `(limit-start)`,
+     preventing over-padded gradients.
 * `gather` and `scatter` kept as `[Int64]` for now. Their config vector lengths
   depend on complex relationships between operand / indices / result ranks, so
   a clean type-safe design requires a separate future phase.
@@ -206,4 +216,11 @@ the common compile-and-run workflow:
   * `dotGeneral batched`
   * `transpose 3D`
   * GPU counterparts for all of the above.
-* Test count: 197 CPU tests + 82 GPU tests = 279 total.
+* New regression tests for the padding bugs:
+  * `grad conv2d stride` — strided conv `[1,4,4,1]` with stride=2
+  * `grad transposeConvolution asymmetric pad` — transpose conv with
+    `p2 (1,0) (1,0)` and `v2 2 2`
+  * `grad pad interior` — pad with interior=1 on `[2]`
+  * `transposeConvolution forward` — basic transpose conv smoke test
+  * `conv2dWithPadding forward` — strided conv with explicit padding
+* Test count: 203 CPU tests + 82 GPU tests = 285 total.

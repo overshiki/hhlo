@@ -119,6 +119,40 @@ tests = testGroup "EndToEnd.NN"
         let row1 = V.slice 4 4 result
         assertBool "layerNorm of uniform row has near-zero mean" $
             abs (V.sum row1 / 4) < 0.1
+    , testCase "conv2dWithPadding forward" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[1, 3, 3, 1] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [1, 2, 2, 1] F32) ]
+                $ do
+                    x <- arg @'[1, 2, 2, 1] @'F32
+                    k <- constant @'[2, 2, 1, 1] @'F32 1.0
+                    y <- conv2dWithPadding @1 @2 @2 @1 @1 @2 @2 @3 @3 (v2 1 1) (p2 (1,1) (1,1)) x k
+                    return y
+        exec <- compile api client (render modu)
+        let inp = V.fromList [1.0, 2.0, 3.0, 4.0]
+        bufIn <- toDeviceF32 api client inp [1, 2, 2, 1]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 9
+        -- With zero padding and 2x2 kernel all 1s:
+        -- [0,0,0]    [1,3,2]
+        -- [0,1,2] -> [4,10,6]
+        -- [0,3,4]    [3,7,4]
+        let expected = V.fromList [1.0, 3.0, 2.0, 4.0, 10.0, 6.0, 3.0, 7.0, 4.0]
+        result @?= expected
+    , testCase "transposeConvolution forward" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [1, 2, 2, 1] F32) ]
+                $ do
+                    x <- arg @'[1, 2, 2, 1] @'F32
+                    k <- constant @'[2, 2, 1, 1] @'F32 1.0
+                    y <- transposeConvolution @1 @2 @2 @1 @1 @2 @2 @2 @2 (v2 2 2) (p2 (0,0) (0,0)) x k
+                    return y
+        exec <- compile api client (render modu)
+        let inp = V.fromList [1.0, 2.0, 3.0, 4.0]
+        bufIn <- toDeviceF32 api client inp [1, 2, 2, 1]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 4
+        -- Output shape is [1,2,2,1]; verify non-zero and finite
+        assertBool "transposeConv output non-zero" $ V.sum result > 0
     , testCase "globalAvgPool" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2] @'F32 "main"
                 [ FuncArg "arg0" (TensorType [1, 4, 4, 2] F32) ]
