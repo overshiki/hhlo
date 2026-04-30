@@ -191,6 +191,19 @@ the common compile-and-run workflow:
 * New dependency: `vector-sized >= 1.5 && < 1.6`.
 * Fix `transposeConvolution` lhs_dilation bug — passing a 2-element spatial
   dilation list no longer drops the second element.
+  
+## next
+* Fix `vjpConcatenate` slice offset bug — `splitAndAccumulate` now uses the
+  cumulative `offset` in `start_indices` for all operands after the first.
+  Previously only `limit_indices` used the offset, causing PJRT to reject
+  gradient modules for any `concatenate2` with 2+ operands.
 * `gather` and `scatter` kept as `[Int64]` for now. Their config vector lengths
   depend on complex relationships between operand / indices / result ranks, so
   a clean type-safe design requires a separate future phase.
+* New E2E tests exercising the vector-sized configs:
+  * `grad concatenate2`, `grad concatenate3` (regression tests for the concat bug)
+  * `slice 2D`, `pad 2D symmetric`
+  * `dotGeneral batched`
+  * `transpose 3D`
+  * GPU counterparts for all of the above.
+* Test count: 197 CPU tests + 82 GPU tests = 279 total.

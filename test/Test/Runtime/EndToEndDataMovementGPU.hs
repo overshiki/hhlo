@@ -38,6 +38,20 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
         [bufOut] <- executeOn api exec dev [bufIn]
         result <- fromDeviceF32 api bufOut 3
         result @?= V.fromList [1.0, 2.0, 3.0]
+    , testCase "slice 2D" $ do
+        GPUResource api client dev <- getGPU
+        let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [4, 4] F32) ]
+                $ do
+                    x <- arg @'[4, 4] @'F32
+                    y <- slice @'[4, 4] @'[2, 2] x (v2 1 1) (v2 3 3) (v2 1 1)
+                    return y
+        exec <- compile api client (render modu)
+        let inp = V.fromList [1..16]
+        bufIn <- toDeviceF32On api client dev inp [4, 4]
+        [bufOut] <- executeOn api exec dev [bufIn]
+        result <- fromDeviceF32 api bufOut 4
+        result @?= V.fromList [6, 7, 10, 11]
     , testCase "slice with stride" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
@@ -52,6 +66,21 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
         [bufOut] <- executeOn api exec dev [bufIn]
         result <- fromDeviceF32 api bufOut 2
         result @?= V.fromList [0.0, 2.0]
+    , testCase "pad 2D symmetric" $ do
+        GPUResource api client dev <- getGPU
+        let modu = moduleFromBuilder @'[4, 4] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [2, 2] F32) ]
+                $ do
+                    x <- arg @'[2, 2] @'F32
+                    padVal <- constant @'[] @'F32 0.0
+                    y <- pad @'[2, 2] @'[4, 4] x padVal (v2 1 1) (v2 1 1) (v2 0 0)
+                    return y
+        exec <- compile api client (render modu)
+        let inp = V.fromList [1, 2, 3, 4]
+        bufIn <- toDeviceF32On api client dev inp [2, 2]
+        [bufOut] <- executeOn api exec dev [bufIn]
+        result <- fromDeviceF32 api bufOut 16
+        result @?= V.fromList [0,0,0,0, 0,1,2,0, 0,3,4,0, 0,0,0,0]
     , testCase "pad edge" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[4] @'F32 "main"

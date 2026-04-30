@@ -135,6 +135,50 @@ tests = testGroup "EndToEnd.Autograd"
         let expected = V.fromList [0,0,0,0, 0,1,0,1, 0,0,0,0, 0,1,0,1]
         assertBool "maxPool grad close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "grad concatenate2" $ withPJRTCPU $ \api client -> do
+        let f a b = do
+                c <- concatenate2 @'[2, 4] @'[2, 4] @'[2, 8] @'F32 1 a b
+                sumAll c
+            modu = moduleFromBuilder @'[4, 4] @'F32 "main"
+                [ FuncArg "arg0" (tensorType (Proxy @'[2, 4]) (Proxy @'F32))
+                , FuncArg "arg1" (tensorType (Proxy @'[2, 4]) (Proxy @'F32))
+                ] $ do
+                    a <- arg @'[2, 4] @'F32
+                    b <- arg @'[2, 4] @'F32
+                    (da, db) <- grad2 f a b
+                    concatenate 0 [da, db]
+        exec <- compile api client (render modu)
+        let inp1 = V.fromList [1..8]
+            inp2 = V.fromList [1..8]
+        bufIn1 <- toDeviceF32 api client inp1 [2, 4]
+        bufIn2 <- toDeviceF32 api client inp2 [2, 4]
+        [bufOut] <- execute api exec [bufIn1, bufIn2]
+        result <- fromDeviceF32 api bufOut 16
+        let expected = V.fromList (replicate 16 1.0)
+        result @?= expected
+    , testCase "grad concatenate3" $ withPJRTCPU $ \api client -> do
+        let f a b c = do
+                x <- concatenate @'[2, 4] @'[2, 12] @'F32 1 [a, b, c]
+                sumAll x
+            modu = moduleFromBuilder @'[6, 4] @'F32 "main"
+                [ FuncArg "arg0" (tensorType (Proxy @'[2, 4]) (Proxy @'F32))
+                , FuncArg "arg1" (tensorType (Proxy @'[2, 4]) (Proxy @'F32))
+                , FuncArg "arg2" (tensorType (Proxy @'[2, 4]) (Proxy @'F32))
+                ] $ do
+                    a <- arg @'[2, 4] @'F32
+                    b <- arg @'[2, 4] @'F32
+                    c <- arg @'[2, 4] @'F32
+                    (da, db, dc) <- grad3 f a b c
+                    concatenate 0 [da, db, dc]
+        exec <- compile api client (render modu)
+        let inp = V.fromList [1..8]
+        bufIn1 <- toDeviceF32 api client inp [2, 4]
+        bufIn2 <- toDeviceF32 api client inp [2, 4]
+        bufIn3 <- toDeviceF32 api client inp [2, 4]
+        [bufOut] <- execute api exec [bufIn1, bufIn2, bufIn3]
+        result <- fromDeviceF32 api bufOut 24
+        let expected = V.fromList (replicate 24 1.0)
+        result @?= expected
     , testCase "grad2 multiply" $ withPJRTCPU $ \api client -> do
         let f x y = do z <- multiply x y; sumAll z
             modu = moduleFromBuilder @'[4] @'F32 "main"

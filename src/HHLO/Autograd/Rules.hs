@@ -470,7 +470,7 @@ vjpConcatenate op resultBars cmap = case getResultBar resultBars of
     splitAndAccumulate _ _ _ [] [] [] acc = return acc
     splitAndAccumulate bar dim offset (vid:vids) (itype:itypes) (sz:szs) acc = do
         let shape = ttShape itype
-            start = replicate (length shape) (0 :: Integer)
+            start = zipWith (\i _ -> if i == dim then offset else 0) [0..] shape
             limit = zipWith (\i s -> if i == dim then offset + s else s) [0..] shape
             stride = replicate (length shape) (1 :: Integer)
         piece <- bslice bar (map fromIntegral start) (map fromIntegral limit) (map fromIntegral stride) itype

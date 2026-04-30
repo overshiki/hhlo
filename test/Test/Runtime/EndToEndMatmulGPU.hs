@@ -76,6 +76,26 @@ tests getGPU = testGroup "EndToEnd.MatmulGPU"
         [bufOut] <- executeOn api exec dev [bufIn]
         result <- fromDeviceF32 api bufOut 4
         result @?= V.fromList [3.1, 3.1, 7.6, 7.6]
+    , testCase "dotGeneral batched" $ do
+        GPUResource api client dev <- getGPU
+        let modu = moduleFromBuilder @'[2, 2, 2] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [2, 2, 3] F32)
+                , FuncArg "arg1" (TensorType [2, 3, 2] F32)
+                ]
+                $ do
+                    x <- arg @'[2, 2, 3] @'F32
+                    y <- arg @'[2, 3, 2] @'F32
+                    z <- dotGeneral @'[2, 2, 3] @'[2, 3, 2] @'[2, 2, 2] @'F32 (v1 0) (v1 0) (v1 2) (v1 1) x y
+                    return z
+        exec <- compile api client (render modu)
+        let a = V.fromList [1,2,3, 4,5,6, 1,2,3, 4,5,6] :: V.Vector Float
+            b = V.fromList [1,2, 3,4, 5,6, 1,2, 3,4, 5,6] :: V.Vector Float
+        bufA <- toDeviceF32On api client dev a [2, 2, 3]
+        bufB <- toDeviceF32On api client dev b [2, 3, 2]
+        [bufOut] <- executeOn api exec dev [bufA, bufB]
+        result <- fromDeviceF32 api bufOut 8
+        let expected = V.fromList [22,28,49,64, 22,28,49,64]
+        result @?= expected
     , testCase "dotGeneral 3D x 2D" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2, 2] @'F32 "main"

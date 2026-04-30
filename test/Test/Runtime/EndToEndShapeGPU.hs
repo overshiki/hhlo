@@ -51,6 +51,23 @@ tests getGPU = testGroup "EndToEnd.ShapeGPU"
         [bufOut] <- executeOn api exec dev [bufIn]
         result <- fromDeviceF32 api bufOut 4
         result @?= V.fromList [1.0, 3.0, 2.0, 4.0]
+    , testCase "transpose 3D" $ do
+        GPUResource api client dev <- getGPU
+        let modu = moduleFromBuilder @'[2, 4, 3] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [2, 3, 4] F32) ]
+                $ do
+                    x <- arg @'[2, 3, 4] @'F32
+                    y <- transpose @'[2, 3, 4] @'[2, 4, 3] (v3 0 2 1) x
+                    return y
+        exec <- compile api client (render modu)
+        let inp = V.fromList [1..24]
+        bufIn <- toDeviceF32On api client dev inp [2, 3, 4]
+        [bufOut] <- executeOn api exec dev [bufIn]
+        result <- fromDeviceF32 api bufOut 24
+        let expected = V.fromList
+                [1,5,9, 2,6,10, 3,7,11, 4,8,12,
+                 13,17,21, 14,18,22, 15,19,23, 16,20,24]
+        result @?= expected
     , testCase "transpose identity" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
