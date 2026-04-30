@@ -162,7 +162,7 @@ the common compile-and-run workflow:
   (falling back to `deps/pjrt/`), so downstream libraries no longer need to
   reimplement plugin discovery.
 
-## next
+## 0.9.0.0 -- 2026-04-20
 
 * **Fixed-length configuration vectors** — rank-polymorphic EDSL ops now use
   `vector-sized` to tie config vector lengths to tensor ranks at compile time.

@@ -1,7 +1,7 @@
 cabal-version:      3.0
 name:               hhlo
-version:            0.8.0.0
-synopsis:           Haskell Frontend for StableHLO — type-safe ML inference on CPU and GPU
+version:            0.9.0.0
+synopsis:           Haskell Frontend for StableHLO — type-safe ML training/inference on CPU and GPU
 description:
     HHLO is a Haskell library and runtime for building, compiling, and executing
     machine-learning programs targeting StableHLO, the portable intermediate
