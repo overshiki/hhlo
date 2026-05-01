@@ -216,6 +216,17 @@ instance Pretty Operation where
         <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
         <> (if null attrs then mempty else " " <> prettyAttrs attrs)
         <> " : " <> prettyResultType operandTypes resultTypes
+    pretty (Operation "stablehlo.custom_call" operands operandTypes attrs _regions results resultTypes) =
+        -- Custom form: @symbol prefix before operands, attribute dict after.
+        -- Example:
+        --   %0 = stablehlo.custom_call @foo(%arg0, %arg1) {call_target_name = "foo", ...}
+        --          : (tensor<2xf32>) -> tensor<2xf32>
+        let target = lookupAttrString "call_target_name" attrs
+        in prettyResultVids results <> " = stablehlo.custom_call"
+           <> (if T.null target then mempty else " @" <> fromText target)
+           <> "(" <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
+           <> (if null attrs then mempty else " " <> prettyAttrs attrs)
+           <> " : " <> prettyResultType operandTypes resultTypes
     pretty (Operation name operands operandTypes attrs regions results resultTypes) =
         if null regions
         then

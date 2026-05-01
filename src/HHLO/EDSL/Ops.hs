@@ -147,12 +147,16 @@ module HHLO.EDSL.Ops
     , pack2
     , pack3
     , slice1
+    -- * Custom calls
+    , customCall1
+    , customCall2
+    , customCallRaw
     ) where
 
 import Prelude hiding (subtract, negate, maximum, minimum, abs, compare, map, tanh, sqrt, sin, cos, tan, floor, ceiling)
 
 import Control.Monad (when)
-import Data.Int (Int64)
+import Data.Int (Int64, Int32)
 import Data.List (elemIndex)
 import Data.Maybe (fromJust)
 import Data.Proxy
@@ -2116,3 +2120,59 @@ einsum spec (Tensor x) (Tensor y) = do
                     (left, ',':right) -> (left, right, outRest)
                     _ -> error "einsum: expected two operands separated by comma"
             _ -> error "einsum: expected -> in subscript string"
+
+
+-- ---------------------------------------------------------------------------
+-- Custom calls
+-- ---------------------------------------------------------------------------
+
+-- | Single-result custom call. All inputs share the same shape / dtype.
+--
+-- The target name is the C symbol that XLA will resolve via @dlsym@.
+-- Use 'customCallRaw' for heterogeneous input types or multiple results.
+customCall1 :: forall s d. (KnownShape s, KnownDType d)
+            => Text              -- ^ target symbol name
+            -> [Tensor s d]      -- ^ inputs
+            -> Text              -- ^ backend_config opaque payload
+            -> Bool              -- ^ has_side_effect
+            -> Builder (Tensor s d)
+customCall1 target inputs backendConfig hasSideEffect = do
+    let vids    = tensorValue <$> inputs
+        inType  = tensorType (Proxy @s) (Proxy @d)
+        outType = tensorType (Proxy @s) (Proxy @d)
+    vidRes <- emitCustomCall target vids (replicate (length inputs) inType) backendConfig hasSideEffect 1 [outType]
+    case vidRes of
+        [vid] -> return (Tensor vid)
+        _     -> error "customCall1: expected exactly one result"
+
+-- | Two-result custom call.
+customCall2 :: forall s1 d1 s2 d2. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2)
+            => Text
+            -> [Tensor s1 d1]    -- ^ inputs (uniform type for convenience)
+            -> Text              -- ^ backend_config
+            -> Bool              -- ^ has_side_effect
+            -> Builder (Tensor s1 d1, Tensor s2 d2)
+customCall2 target inputs backendConfig hasSideEffect = do
+    let vids     = tensorValue <$> inputs
+        inType   = tensorType (Proxy @s1) (Proxy @d1)
+        outType1 = tensorType (Proxy @s1) (Proxy @d1)
+        outType2 = tensorType (Proxy @s2) (Proxy @d2)
+    vidsRes <- emitCustomCall target vids (replicate (length inputs) inType) backendConfig hasSideEffect 1 [outType1, outType2]
+    case vidsRes of
+        [v1, v2] -> return (Tensor v1, Tensor v2)
+        _        -> error "customCall2: expected exactly two results"
+
+-- | Low-level custom call for plugin authors.
+--
+-- Accepts raw 'ValueId's and 'TensorType's so that callers can mix shapes
+-- and dtypes freely (e.g. sparse indices as 'I32' and values as 'F32').
+-- The caller is responsible for ensuring the C kernel signature matches.
+customCallRaw :: Text
+              -> [ValueId]         -- ^ operand value ids
+              -> [TensorType]      -- ^ operand types
+              -> Text              -- ^ backend_config
+              -> Bool              -- ^ has_side_effect
+              -> Int32             -- ^ api_version
+              -> [TensorType]      -- ^ result types
+              -> Builder [ValueId]
+customCallRaw = emitCustomCall

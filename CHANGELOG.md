@@ -223,4 +223,20 @@ the common compile-and-run workflow:
   * `grad pad interior` — pad with interior=1 on `[2]`
   * `transposeConvolution forward` — basic transpose conv smoke test
   * `conv2dWithPadding forward` — strided conv with explicit padding
-* Test count: 203 CPU tests + 82 GPU tests = 285 total.
+* **Generic custom-call infrastructure** — first-class support for
+  `stablehlo.custom_call`, enabling external packages to register their own
+  XLA custom-call kernels (CUDA, CPU, or otherwise) without modifying HHLO.
+  * `HHLO.IR.Builder.emitCustomCall` — emit `stablehlo.custom_call` with
+    standard attributes (`call_target_name`, `has_side_effect`,
+    `backend_config`, `api_version`).
+  * `HHLO.EDSL.Ops.customCall1`, `customCall2`, `customCallRaw` — typed
+    frontend wrappers. `customCallRaw` is the escape hatch for heterogeneous
+    input types and arbitrary result counts.
+  * `HHLO.Runtime.CustomCall.loadCustomCallLibrary` — `dlopen` wrapper with
+    `RTLD_GLOBAL`, required for XLA's internal `dlsym` resolution.
+  * `HHLO.IR.Pretty` — special case for `stablehlo.custom_call` emits the
+    `@symbol` prefix before operands (e.g.
+    `stablehlo.custom_call @foo(%arg0) {...} : ...`).
+  * `examples/CustomCallPlugin.hs` + `examples/cbits/vector_add.cu` —
+    minimal working example showing the full plugin contract.
+* Test count: 205 CPU tests + 82 GPU tests = 287 total.

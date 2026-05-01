@@ -26,6 +26,7 @@ module HHLO.IR.Builder
     , emitOpN
     , emitOpRegions
     , emitOpRegionsN
+    , emitCustomCall
     , emitReduce
     , emitReturn
     , runBlockBuilder
@@ -45,6 +46,7 @@ module HHLO.IR.Builder
     ) where
 
 import Control.Monad.State
+import Data.Int (Int32)
 import Data.Proxy
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -308,6 +310,28 @@ moduleFromBuilderT :: forall ss ds. TupleBuilder (Tuple ss ds) => Text -> [FuncA
 moduleFromBuilderT name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
     in Module [runBuilderT name renamed action]
+
+-- | Emit a 'stablehlo.custom_call' operation.
+--
+-- The target name is the C symbol that XLA will look up via @dlsym@.
+-- 'api_version' selects the ABI: @1@ for GPU (CUstream, void** buffers,
+-- opaque, len); other values for CPU ABI.
+emitCustomCall :: Text          -- ^ call_target_name
+               -> [ValueId]     -- ^ operands
+               -> [TensorType]  -- ^ operand types
+               -> Text          -- ^ backend_config (opaque payload)
+               -> Bool          -- ^ has_side_effect
+               -> Int32         -- ^ api_version
+               -> [TensorType]  -- ^ result types
+               -> Builder [ValueId]
+emitCustomCall target operands operandTypes backendConfig hasSideEffect apiVersion resultTypes =
+    emitOpN "stablehlo.custom_call" operands operandTypes
+        [ AttrString "call_target_name" target
+        , AttrBool   "has_side_effect"  hasSideEffect
+        , AttrString "backend_config"   backendConfig
+        , AttrInt    "api_version"      (fromIntegral apiVersion)
+        ]
+        resultTypes
 
 -- | Emit a generic single-result operation into the builder.
 -- The caller must provide the operand types so that the pretty-printer

@@ -62,6 +62,34 @@ tests = testGroup "Pretty"
             let rendered = render op
             assertBool "should be generic form" $
                 "\"stablehlo.return\"" `T.isInfixOf` rendered
+        , testCase "custom_call with @symbol" $ do
+            let op = Operation "stablehlo.custom_call" [ValueId 0, ValueId 1]
+                    [TensorType [4] F32, TensorType [4] F32]
+                    [ AttrString "call_target_name" "vector_add"
+                    , AttrBool   "has_side_effect"  False
+                    , AttrString "backend_config"   ""
+                    , AttrInt    "api_version"      1
+                    ] [] [ValueId 2] [TensorType [4] F32]
+            let rendered = render op
+            assertBool "should contain @symbol prefix" $
+                "stablehlo.custom_call @vector_add(" `T.isInfixOf` rendered
+            assertBool "should contain call_target_name attr" $
+                "call_target_name = \"vector_add\"" `T.isInfixOf` rendered
+            assertBool "should contain has_side_effect attr" $
+                "has_side_effect = false" `T.isInfixOf` rendered
+            assertBool "should contain api_version attr" $
+                "api_version = 1 : i64" `T.isInfixOf` rendered
+            assertBool "should end with function type" $
+                ": (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>" `T.isSuffixOf` rendered
+        , testCase "custom_call without operands" $ do
+            let op = Operation "stablehlo.custom_call" []
+                    []
+                    [ AttrString "call_target_name" "rng_seed"
+                    , AttrBool   "has_side_effect"  False
+                    ] [] [ValueId 0] [TensorType [] I64]
+            let rendered = render op
+            assertBool "should contain @symbol with empty parens" $
+                "stablehlo.custom_call @rng_seed()" `T.isInfixOf` rendered
         ]
     , testGroup "Constants"
         [ testCase "scalar constant" $ do
