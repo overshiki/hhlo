@@ -192,7 +192,7 @@ the common compile-and-run workflow:
 * Fix `transposeConvolution` lhs_dilation bug — passing a 2-element spatial
   dilation list no longer drops the second element.
   
-## next
+## 0.10.0.0 -- 2026-05-02
 * Fix `vjpConcatenate` slice offset bug — `splitAndAccumulate` now uses the
   cumulative `offset` in `start_indices` for all operands after the first.
   Previously only `limit_indices` used the offset, causing PJRT to reject
