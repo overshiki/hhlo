@@ -19,7 +19,7 @@
 -- >     print (hostToList result)
 module HHLO.Session
     ( -- * Session lifecycle
-      Session
+      Session(..)
     , withCPU
     , withGPU
     , withGPUDevice

@@ -130,6 +130,13 @@ PJRT_Error* hhlo_pjrt_error_message(PJRT_Api* api, PJRT_Error* error,
 PJRT_Error* hhlo_pjrt_error_destroy(PJRT_Api* api, PJRT_Error* error);
 
 /* ---------------------------------------------------------------------------
+ * Custom calls
+ * --------------------------------------------------------------------------- */
+int hhlo_pjrt_register_gpu_custom_call(PJRT_Api* api, const char* lib_path,
+                                        const char* function_name,
+                                        const char** out_error_msg);
+
+/* ---------------------------------------------------------------------------
  * Buffer type constants
  * --------------------------------------------------------------------------- */
 int hhlo_buffer_type_invalid(void);

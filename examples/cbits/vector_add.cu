@@ -1,16 +1,22 @@
 // Minimal XLA GPU custom-call kernel: element-wise vector add.
 //
-// XLA invokes this with API version 1:
+// Uses API_VERSION_STATUS_RETURNING_UNIFIED (StableHLO api_version = 3).
+// XLA invokes this with:
 //   void target(CUstream stream, void** buffers,
-//               const char* opaque, size_t opaque_len)
+//               const char* opaque, size_t opaque_len,
+//               XlaCustomCallStatus* status)
 //
 // buffers layout: [in0, in1, ..., out0, out1, ...]
 //
 // Compile to a shared library with:
-//   nvcc -shared -o libvector_add.so -Xcompiler -fPIC vector_add.cu -lcudart -O3
+//   cd examples/cbits && bash build.sh
 
 #include <cuda_runtime.h>
 #include <cuda.h>
+
+// Opaque status struct from XLA.  Success is the default state, so we
+// can simply ignore the pointer for successful calls.
+typedef struct XlaCustomCallStatus_ XlaCustomCallStatus;
 
 __global__ void vector_add_kernel(const float* a, const float* b,
                                   float* c, int n)
@@ -23,7 +29,8 @@ __global__ void vector_add_kernel(const float* a, const float* b,
 
 extern "C" __attribute__((visibility("default")))
 void vector_add(CUstream stream, void** buffers,
-                const char* opaque, size_t opaque_len)
+                const char* opaque, size_t opaque_len,
+                XlaCustomCallStatus* status)
 {
     const float* a = (const float*)buffers[0];
     const float* b = (const float*)buffers[1];

@@ -48,6 +48,7 @@ module HHLO.IR.Builder
 import Control.Monad.State
 import Data.Int (Int32)
 import Data.Proxy
+import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.TypeLits
@@ -329,7 +330,7 @@ emitCustomCall target operands operandTypes backendConfig hasSideEffect apiVersi
         [ AttrString "call_target_name" target
         , AttrBool   "has_side_effect"  hasSideEffect
         , AttrString "backend_config"   backendConfig
-        , AttrInt    "api_version"      (fromIntegral apiVersion)
+        , AttrRaw    $ "api_version = " <> T.pack (show apiVersion) <> " : i32"
         ]
         resultTypes
 

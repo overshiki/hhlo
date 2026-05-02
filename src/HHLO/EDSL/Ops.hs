@@ -2140,7 +2140,7 @@ customCall1 target inputs backendConfig hasSideEffect = do
     let vids    = tensorValue <$> inputs
         inType  = tensorType (Proxy @s) (Proxy @d)
         outType = tensorType (Proxy @s) (Proxy @d)
-    vidRes <- emitCustomCall target vids (replicate (length inputs) inType) backendConfig hasSideEffect 1 [outType]
+    vidRes <- emitCustomCall target vids (replicate (length inputs) inType) backendConfig hasSideEffect 3 [outType]
     case vidRes of
         [vid] -> return (Tensor vid)
         _     -> error "customCall1: expected exactly one result"
@@ -2157,7 +2157,7 @@ customCall2 target inputs backendConfig hasSideEffect = do
         inType   = tensorType (Proxy @s1) (Proxy @d1)
         outType1 = tensorType (Proxy @s1) (Proxy @d1)
         outType2 = tensorType (Proxy @s2) (Proxy @d2)
-    vidsRes <- emitCustomCall target vids (replicate (length inputs) inType) backendConfig hasSideEffect 1 [outType1, outType2]
+    vidsRes <- emitCustomCall target vids (replicate (length inputs) inType) backendConfig hasSideEffect 3 [outType1, outType2]
     case vidsRes of
         [v1, v2] -> return (Tensor v1, Tensor v2)
         _        -> error "customCall2: expected exactly two results"

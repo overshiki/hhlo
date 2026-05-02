@@ -3,3 +3,4 @@ deps
 devlog
 *.o
 *.hi
+*.so

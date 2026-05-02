@@ -650,3 +650,80 @@ PJRT_Error* hhlo_pjrt_execute_multi(PJRT_Api* api,
     }
     return err;
 }
+
+// ---------------------------------------------------------------------------
+// Custom calls (GPU)
+// ---------------------------------------------------------------------------
+
+// Local definitions for PJRT GPU Custom Call extension
+// (matches xla/pjrt/c/pjrt_c_api_gpu_extension.h)
+
+typedef struct {
+    size_t struct_size;
+    const char* function_name;
+    size_t function_name_size;
+    int api_version;
+    void* handler_instantiate;
+    void* handler_prepare;
+    void* handler_initialize;
+    void* handler_execute;
+} PJRT_Gpu_Register_Custom_Call_Args;
+
+typedef PJRT_Error* PJRT_Gpu_Register_Custom_Call(
+    PJRT_Gpu_Register_Custom_Call_Args* args);
+
+typedef struct {
+    PJRT_Extension_Base base;
+    PJRT_Gpu_Register_Custom_Call* custom_call;
+} PJRT_Gpu_Custom_Call;
+
+// Load a shared library, look up 'function_name', and register it with the
+// PJRT GPU plugin via the PJRT_Gpu_Custom_Call extension.
+//
+// Returns 0 on success, or a negative code on failure.
+// On failure, *out_error_msg is set to a static/dynamic error string.
+int hhlo_pjrt_register_gpu_custom_call(PJRT_Api* api, const char* lib_path,
+                                        const char* function_name,
+                                        const char** out_error_msg) {
+    *out_error_msg = NULL;
+
+    // 1. Load the library (keep it open for the process lifetime)
+    void* handle = dlopen(lib_path, RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+        *out_error_msg = dlerror();
+        return -1;
+    }
+
+    // 2. Look up the target symbol
+    void* symbol = dlsym(handle, function_name);
+    if (!symbol) {
+        *out_error_msg = dlerror();
+        return -2;
+    }
+
+    // 3. Walk the PJRT extension chain to find the GPU custom call extension
+    PJRT_Extension_Base* ext = api->extension_start;
+    while (ext != NULL) {
+        if (ext->type == PJRT_Extension_Type_Gpu_Custom_Call) {
+            PJRT_Gpu_Custom_Call* gpu_ext = (PJRT_Gpu_Custom_Call*)ext;
+
+            PJRT_Gpu_Register_Custom_Call_Args args = {0};
+            args.struct_size = sizeof(PJRT_Gpu_Register_Custom_Call_Args);
+            args.function_name = function_name;
+            args.function_name_size = strlen(function_name);
+            args.api_version = 0;        // 0 = untyped / original ABI
+            args.handler_execute = symbol;
+
+            PJRT_Error* err = gpu_ext->custom_call(&args);
+            if (err != NULL) {
+                *out_error_msg = "PJRT_Gpu_Register_Custom_Call returned an error";
+                return -3;
+            }
+            return 0;
+        }
+        ext = ext->next;
+    }
+
+    *out_error_msg = "PJRT GPU custom call extension not found";
+    return -4;
+}

@@ -68,7 +68,7 @@ tests = testGroup "Pretty"
                     [ AttrString "call_target_name" "vector_add"
                     , AttrBool   "has_side_effect"  False
                     , AttrString "backend_config"   ""
-                    , AttrInt    "api_version"      1
+                    , AttrRaw    "api_version = 3 : i32"
                     ] [] [ValueId 2] [TensorType [4] F32]
             let rendered = render op
             assertBool "should contain @symbol prefix" $
@@ -78,7 +78,7 @@ tests = testGroup "Pretty"
             assertBool "should contain has_side_effect attr" $
                 "has_side_effect = false" `T.isInfixOf` rendered
             assertBool "should contain api_version attr" $
-                "api_version = 1 : i64" `T.isInfixOf` rendered
+                "api_version = 3 : i32" `T.isInfixOf` rendered
             assertBool "should end with function type" $
                 ": (tensor<4xf32>, tensor<4xf32>) -> tensor<4xf32>" `T.isSuffixOf` rendered
         , testCase "custom_call without operands" $ do

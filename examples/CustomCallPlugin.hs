@@ -17,23 +17,24 @@
 -- @
 module Main where
 
-import qualified Data.Vector.Storable as V
+import qualified Data.Text as T
 import HHLO.Core.Types
 import HHLO.EDSL.Ops
 import HHLO.IR.AST
 import HHLO.IR.Builder
 import HHLO.IR.Pretty
-import HHLO.Runtime.CustomCall (loadCustomCallLibrary)
+import HHLO.Runtime.CustomCall (registerGpuCustomCall)
 import HHLO.Session
 
 main :: IO ()
 main = withGPU $ \sess -> do
-    -- 1. Load the custom-call library into the global symbol namespace.
+    -- 1. Register the GPU custom-call target with the PJRT CUDA plugin.
     --    This MUST happen before 'compile'.
-    loadCustomCallLibrary "examples/cbits/libvector_add.so"
+    registerGpuCustomCall (sessionApi sess)
+        "examples/cbits/libvector_add.so" "vector_add"
 
     -- 2. Build a StableHLO module that uses the custom call.
-    let modu = moduleFromBuilder @'[4] @'F32 "vector_add"
+    let modu = moduleFromBuilder @'[4] @'F32 "main"
             [ FuncArg "a" (TensorType [4] F32)
             , FuncArg "b" (TensorType [4] F32)
             ]
@@ -44,13 +45,13 @@ main = withGPU $ \sess -> do
                 return c
 
     putStrLn "=== Emitted MLIR ==="
-    putStrLn (render modu)
+    putStrLn (T.unpack (render modu))
 
     -- 3. Compile and execute via PJRT.
     compiled <- compile sess modu
-    let aVals = V.fromList [1.0, 2.0, 3.0, 4.0]
-        bVals = V.fromList [10.0, 20.0, 30.0, 40.0]
-    result <- run sess compiled (aVals, bVals)
+    let aVals = hostFromList @'[4] @'F32 [1.0, 2.0, 3.0, 4.0]
+        bVals = hostFromList @'[4] @'F32 [10.0, 20.0, 30.0, 40.0]
+    result <- run sess compiled (aVals, bVals) :: IO (HostTensor '[4] 'F32)
 
     putStrLn "=== Result ==="
-    print result
+    print (hostToList result)

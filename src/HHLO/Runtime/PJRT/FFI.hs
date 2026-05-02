@@ -189,3 +189,14 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_error_message"
 
 foreign import ccall "pjrt_shim.h hhlo_pjrt_error_destroy"
     c_pjrtErrorDestroy :: Ptr PJRTApi -> Ptr PJRTError -> IO (Ptr PJRTError)
+
+-- ---------------------------------------------------------------------------
+-- Custom calls
+-- ---------------------------------------------------------------------------
+
+foreign import ccall "pjrt_shim.h hhlo_pjrt_register_gpu_custom_call"
+    c_pjrtRegisterGpuCustomCall :: Ptr PJRTApi
+                                -> CString            -- lib_path
+                                -> CString            -- function_name
+                                -> Ptr CString        -- out_error_msg
+                                -> IO CInt
