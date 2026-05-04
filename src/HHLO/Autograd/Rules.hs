@@ -8,7 +8,7 @@ module HHLO.Autograd.Rules
 
 import Data.Int (Int64)
 import Data.List (sortOn, zipWith4)
-import Data.Maybe (isNothing)
+import Data.Maybe (fromMaybe, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map.Strict as Map
@@ -277,6 +277,7 @@ vjpBroadcastInDim op resultBars cmap = case getResultBar resultBars of
     Nothing -> return cmap
   where
     findDims [] = Nothing
+    findDims (AttrIntList "broadcast_dimensions" d : _) = Just d
     findDims (AttrIntList "dims" d : _) = Just d
     findDims (_ : attrs) = findDims attrs
 
@@ -434,6 +435,9 @@ vjpSlice op resultBars cmap = case getResultBar resultBars of
 
     findAttr :: Text -> [Attribute] -> [Int64]
     findAttr _ [] = error "autograd-hhlo: slice missing attribute"
+    findAttr name (AttrIntList n v : rest)
+        | n == name = v
+        | otherwise = findAttr name rest
     findAttr name (AttrRaw raw : rest) =
         let key = name <> " = array<i64:"
         in if key `T.isInfixOf` raw
@@ -510,6 +514,9 @@ vjpPad op resultBars cmap = case getResultBar resultBars of
 
     findAttr :: Text -> [Attribute] -> Maybe [Int64]
     findAttr _ [] = Nothing
+    findAttr name (AttrIntList n v : rest)
+        | n == name = Just v
+        | otherwise = findAttr name rest
     findAttr name (AttrRaw raw : rest) =
         let key = name <> " = array<i64:"
         in if key `T.isInfixOf` raw
@@ -700,6 +707,9 @@ broadcastToInputShape reduced xShape windowDims _strides = do
 
 findRawIntList :: Text -> [Attribute] -> [Int64]
 findRawIntList _ [] = []
+findRawIntList name (AttrIntList n v : rest)
+    | n == name = v
+    | otherwise = findRawIntList name rest
 findRawIntList name (AttrRaw raw : rest) =
     let key = name <> " = array<i64:"
     in if key `T.isInfixOf` raw
@@ -748,37 +758,38 @@ vjpConvolution op resultBars cmap = case getResultBar resultBars of
             inputType = btType input
             kernelType = btType kernel
             attrs = opAttributes op
-            dimNums = lookupAttrString "dim_numbers" attrs
-        -- Dispatch based on whether this is a regular conv or transpose conv.
-        -- Regular conv:  "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]"
-        -- Transpose conv: "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]"
-        let windowStr = lookupAttrString "window" attrs
-            (stride, pad, lhsDilate, _rhsDilate) = parseWindowString windowStr
-        if dimNums == "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]"
+            kif = fromMaybe (-1) $ lookupAttrInt "kernel_input_feature_dimension" attrs
+            kof = fromMaybe (-1) $ lookupAttrInt "kernel_output_feature_dimension" attrs
+            stride  = fromMaybe [1,1] $ lookupAttrIntList "window_strides" attrs
+            padding = fromMaybe (replicate 4 0) $ lookupAttrIntList "padding" attrs
+            lhsDilate = fromMaybe [1,1] $ lookupAttrIntList "lhs_dilation" attrs
+            padPairs = [[padding !! 0, padding !! 1], [padding !! 2, padding !! 3]]
+        -- Dispatch based on kernel feature dimension order.
+        -- Regular conv: kernel_input=2, kernel_output=3
+        -- Transpose conv: kernel_input=3, kernel_output=2
+        if kif == 2 && kof == 3
             then do
                 -- Regular convolution.
-                dInput <- convBackwardInput bar kernel kernelType inputType stride pad
+                dInput <- convBackwardInput bar kernel kernelType inputType stride padPairs
                 cmap' <- accumulate cmap (btVid input) dInput
-                -- Only compute kernel gradient if the kernel is a function argument
-                -- (negative ValueId) or if its gradient is already needed.
                 let needKernelGrad = btVid kernel < 0 || Map.member (btVid kernel) cmap
                 if needKernelGrad
                     then do
-                        dKernel <- convBackwardKernel input inputType bar stride pad
+                        dKernel <- convBackwardKernel input inputType bar stride padPairs
                         accumulate cmap' (btVid kernel) dKernel
                     else return cmap'
-            else if dimNums == "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]"
+            else if kif == 3 && kof == 2
             then do
                 -- Transposed convolution.
-                dInput <- transposeConvBackwardInput bar kernel inputType lhsDilate pad
+                dInput <- transposeConvBackwardInput bar kernel inputType lhsDilate padPairs
                 cmap' <- accumulate cmap (btVid input) dInput
                 let needKernelGrad = btVid kernel < 0 || Map.member (btVid kernel) cmap
                 if needKernelGrad
                     then do
-                        dKernel <- transposeConvBackwardKernel input inputType bar lhsDilate pad
+                        dKernel <- transposeConvBackwardKernel input inputType bar lhsDilate padPairs
                         accumulate cmap' (btVid kernel) dKernel
                     else return cmap'
-            else error "autograd-hhlo: convolution VJP only supports NHWC dim_numbers"
+            else error "autograd-hhlo: convolution VJP only supports NHWC canonical attrs"
     Nothing -> return cmap
 
 convBackwardInput :: BTensor -> BTensor -> TensorType -> TensorType -> [Int64] -> [[Int64]] -> Builder BTensor
@@ -972,6 +983,18 @@ buildWindowString stride pad lhsDilate rhsDilate =
     showPad ps = "[" <> T.intercalate ", " (map showPair ps) <> "]"
     showPair [l, h] = "[" <> T.pack (show l) <> ", " <> T.pack (show h) <> "]"
     showPair _      = error "buildWindowString: invalid padding pair"
+
+lookupAttrInt :: Text -> [Attribute] -> Maybe Int64
+lookupAttrInt name = listToMaybe . foldr f []
+  where
+    f (AttrInt n v) acc | n == name = v : acc
+    f _ acc = acc
+
+lookupAttrIntList :: Text -> [Attribute] -> Maybe [Int64]
+lookupAttrIntList name = listToMaybe . foldr f []
+  where
+    f (AttrIntList n v) acc | n == name = v : acc
+    f _ acc = acc
 
 lookupAttrString :: Text -> [Attribute] -> Text
 lookupAttrString name = foldr f ""

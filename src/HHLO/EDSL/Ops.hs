@@ -270,11 +270,12 @@ dotGeneral lhsBatch rhsBatch lhsContract rhsContract (Tensor x) (Tensor y) = do
     let inType1 = tensorType (Proxy @s1) (Proxy @d)
         inType2 = tensorType (Proxy @s2) (Proxy @d)
         outType = tensorType (Proxy @sOut) (Proxy @d)
-        batchAttr      = AttrString "batching_dims" ("[" <> T.intercalate ", " (fmap (T.pack . show) (VS.toList lhsBatch)) <> "] x [" <> T.intercalate ", " (fmap (T.pack . show) (VS.toList rhsBatch)) <> "]")
-        contractingAttr = AttrString "contracting_dims" ("[" <> T.intercalate ", " (fmap (T.pack . show) (VS.toList lhsContract)) <> "] x [" <> T.intercalate ", " (fmap (T.pack . show) (VS.toList rhsContract)) <> "]")
+        batchL    = AttrIntList "lhs_batching_dimensions" (VS.toList lhsBatch)
+        batchR    = AttrIntList "rhs_batching_dimensions" (VS.toList rhsBatch)
+        contractL = AttrIntList "lhs_contracting_dimensions" (VS.toList lhsContract)
+        contractR = AttrIntList "rhs_contracting_dimensions" (VS.toList rhsContract)
     vid <- emitOp "stablehlo.dot_general" [x, y] [inType1, inType2]
-            [ batchAttr
-            , contractingAttr
+            [ batchL, batchR, contractL, contractR
             ] outType
     return (Tensor vid)
 
@@ -368,7 +369,7 @@ broadcastWithDims dims (Tensor x) = do
     let inType = tensorType (Proxy @sFrom) (Proxy @d)
         outType = tensorType (Proxy @sTo) (Proxy @d)
     vid <- emitOp "stablehlo.broadcast_in_dim" [x] [inType]
-        [AttrIntList "dims" (fromIntegral <$> dims)] outType
+        [AttrIntList "broadcast_dimensions" (fromIntegral <$> dims)] outType
     return (Tensor vid)
 
 -- | Transpose a tensor by permuting dimensions.
@@ -486,7 +487,7 @@ reduceSumDim dims (Tensor x) = do
     vid <- emitOpRegions "stablehlo.reduce"
             [x, zeroVid]
             [inType, elemType]
-            [AttrRaw $ "dimensions = array<i64: " <> T.intercalate ", " [T.pack (show d) | d <- dims] <> ">"]
+            [AttrIntList "dimensions" (fromIntegral <$> dims)]
             [Region [redBlock]]
             outType
     return (Tensor vid)
@@ -571,21 +572,28 @@ conv2dWithPadding strides padding input kernel = do
     let inType1 = tensorType (Proxy @'[batch, h, w, inCh])   (Proxy @'F32)
         inType2 = tensorType (Proxy @'[kh, kw, inCh, outCh]) (Proxy @'F32)
         outType = tensorType (Proxy @'[batch, oh, ow, outCh]) (Proxy @'F32)
-        dimNums = "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]"
-        strideStr = "[" <> T.intercalate ", " ((T.pack . show) <$> VS.toList strides) <> "]"
-        padStr = "[" <> padPair (padding `VS.index` 0) <> ", " <> padPair (padding `VS.index` 1) <> "]"
-        window  = "{stride = " <> strideStr <> ", pad = " <> padStr <> "}"
+        strideVals = VS.toList strides
+        padVals    = concatMap (\(l, h) -> [l, h]) (VS.toList padding)
     vid <- emitOp "stablehlo.convolution"
             [tensorValue input, tensorValue kernel]
             [inType1, inType2]
-            [ AttrString "dim_numbers" dimNums
-            , AttrString "window" window
+            [ AttrIntList "input_spatial_dimensions" [1, 2]
+            , AttrIntList "kernel_spatial_dimensions" [0, 1]
+            , AttrIntList "output_spatial_dimensions" [1, 2]
+            , AttrInt "input_batch_dimension" 0
+            , AttrInt "input_feature_dimension" 3
+            , AttrInt "kernel_input_feature_dimension" 2
+            , AttrInt "kernel_output_feature_dimension" 3
+            , AttrInt "output_batch_dimension" 0
+            , AttrInt "output_feature_dimension" 3
+            , AttrIntList "window_strides" strideVals
+            , AttrIntList "padding" padVals
+            , AttrIntList "lhs_dilation" [1, 1]
+            , AttrIntList "rhs_dilation" [1, 1]
             , AttrInt "batch_group_count" 1
             , AttrInt "feature_group_count" 1
             ] outType
     return (Tensor vid)
-  where
-    padPair (l, h) = "[" <> T.pack (show l) <> ", " <> T.pack (show h) <> "]"
 
 -- | Batch normalization for inference.
 --
@@ -749,7 +757,7 @@ compare (Tensor x) (Tensor y) direction = do
     let inType  = tensorType (Proxy @s) (Proxy @d)
         outType = tensorType (Proxy @s) (Proxy @'Bool)
     vid <- emitOp "stablehlo.compare" [x, y] [inType, inType]
-        [ AttrRaw ("comparison_direction = #stablehlo<comparison_direction " <> direction <> ">")
+        [ AttrEnum "comparison_direction" direction
         ] outType
     return (Tensor vid)
 
@@ -898,9 +906,9 @@ slice :: forall sIn sOut d.
 slice operand start limit stride = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        startAttr = AttrRaw $ "start_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList start) <> ">"
-        limitAttr = AttrRaw $ "limit_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList limit) <> ">"
-        strideAttr = AttrRaw $ "strides = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList stride) <> ">"
+        startAttr = AttrIntList "start_indices" (VS.toList start)
+        limitAttr = AttrIntList "limit_indices" (VS.toList limit)
+        strideAttr = AttrIntList "strides" (VS.toList stride)
 
     let (Tensor operandVid) = operand
     vid <- emitOp "stablehlo.slice" [operandVid] [inType]
@@ -923,9 +931,9 @@ pad operand paddingValue low high interior = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         padType  = tensorType (Proxy @'[])  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        lowAttr  = AttrRaw $ "edge_padding_low = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList low) <> ">"
-        highAttr = AttrRaw $ "edge_padding_high = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList high) <> ">"
-        intAttr  = AttrRaw $ "interior_padding = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList interior) <> ">"
+        lowAttr  = AttrIntList "edge_padding_low" (VS.toList low)
+        highAttr = AttrIntList "edge_padding_high" (VS.toList high)
+        intAttr  = AttrIntList "interior_padding" (VS.toList interior)
 
     let (Tensor operandVid) = operand
         (Tensor padVid)     = paddingValue
@@ -943,7 +951,7 @@ dynamicSlice :: forall sIn sOut d.
 dynamicSlice operand startIndices sliceSizes = do
     let inType   = tensorType (Proxy @sIn)  (Proxy @d)
         outType  = tensorType (Proxy @sOut) (Proxy @d)
-        sizesAttr = AttrRaw $ "slice_sizes = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> VS.toList sliceSizes) <> ">"
+        sizesAttr = AttrIntList "slice_sizes" (VS.toList sliceSizes)
 
     let (Tensor operandVid) = operand
         startVids = tensorValue <$> startIndices
@@ -1062,8 +1070,7 @@ map inputs dimensions computation = do
         result <- computation args
         emitReturn [tensorValue result] [elemOutType]
 
-    let dimsAttr = AttrRaw $ "dimensions = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> dimensions) <> ">"
+    let dimsAttr = AttrIntList "dimensions" dimensions
 
     let inputVids = tensorValue <$> inputs
         inputTypes = replicate (length inputs) inType
@@ -1277,10 +1284,8 @@ reduceWindow windowDims strides padding reduction initVal input = do
             _ -> error $ "reduceWindow: unsupported reduction: " ++ show reduction
         emitReturn [tensorValue result] [elemType]
 
-    let windowAttr = AttrRaw $ "window_dimensions = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> VS.toList windowDims) <> ">"
-        strideAttr = AttrRaw $ "window_strides = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> VS.toList strides) <> ">"
+    let windowAttr = AttrIntList "window_dimensions" (VS.toList windowDims)
+        strideAttr = AttrIntList "window_strides" (VS.toList strides)
         padStr = "[" <> T.intercalate ", " (padPairV <$> VS.toList padding) <> "]"
         paddingAttr = AttrRaw $ "padding = dense<" <> padStr <> "> : tensor<"
             <> T.pack (show (length (shapeVal (Proxy @sIn)))) <> "x2xi64>"
@@ -1360,16 +1365,23 @@ transposeConvolution lhsDilation padding input kernel = do
     let inType1 = tensorType (Proxy @'[batch, h, w, inCh]) (Proxy @'F32)
         inType2 = tensorType (Proxy @'[kh, kw, outCh, inCh]) (Proxy @'F32)
         outType = tensorType (Proxy @'[batch, oh, ow, outCh]) (Proxy @'F32)
-        dimNums = "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]"
-        padStr  = "[[" <> T.pack (show (fst (padding `VS.index` 0))) <> ", " <> T.pack (show (snd (padding `VS.index` 0))) <> "], ["
-               <> T.pack (show (fst (padding `VS.index` 1))) <> ", " <> T.pack (show (snd (padding `VS.index` 1))) <> "]]"
-        window  = "{stride = [1, 1], pad = " <> padStr
-               <> ", lhs_dilate = [" <> T.intercalate ", " ((T.pack . show) <$> VS.toList lhsDilation) <> "]"
-               <> ", rhs_dilate = [1, 1]}"
+        padVals = concatMap (\(l, h) -> [l, h]) (VS.toList padding)
+        dilVals = VS.toList lhsDilation
     vid <- emitOp "stablehlo.convolution" [tensorValue input, tensorValue kernel]
             [inType1, inType2]
-            [ AttrString "dim_numbers" dimNums
-            , AttrString "window" window
+            [ AttrIntList "input_spatial_dimensions" [1, 2]
+            , AttrIntList "kernel_spatial_dimensions" [0, 1]
+            , AttrIntList "output_spatial_dimensions" [1, 2]
+            , AttrInt "input_batch_dimension" 0
+            , AttrInt "input_feature_dimension" 3
+            , AttrInt "kernel_input_feature_dimension" 3
+            , AttrInt "kernel_output_feature_dimension" 2
+            , AttrInt "output_batch_dimension" 0
+            , AttrInt "output_feature_dimension" 3
+            , AttrIntList "window_strides" [1, 1]
+            , AttrIntList "padding" padVals
+            , AttrIntList "lhs_dilation" dilVals
+            , AttrIntList "rhs_dilation" [1, 1]
             , AttrInt "batch_group_count" 1
             , AttrInt "feature_group_count" 1
             ] outType
@@ -1836,7 +1848,7 @@ rngUniform a b = do
     vid <- emitOp "stablehlo.rng"
             [tensorValue a, tensorValue b, shapeConst]
             [ TensorType [] F32, TensorType [] F32, TensorType [fromIntegral (length shapeVals)] I64 ]
-            [AttrRaw "rng_distribution = #stablehlo<rng_distribution UNIFORM>"]
+            [AttrEnum "rng_distribution" "UNIFORM"]
             outType
     return (Tensor vid)
 
@@ -1856,7 +1868,7 @@ rngNormal = do
     vid <- emitOp "stablehlo.rng"
             [tensorValue a, tensorValue b, shapeConst]
             [ TensorType [] F32, TensorType [] F32, TensorType [fromIntegral (length shapeVals)] I64 ]
-            [AttrRaw "rng_distribution = #stablehlo<rng_distribution NORMAL>"]
+            [AttrEnum "rng_distribution" "NORMAL"]
             outType
     return (Tensor vid)
 
@@ -1875,7 +1887,7 @@ rngBitGenerator state = do
     vids <- emitOpN "stablehlo.rng_bit_generator"
               [tensorValue state]
               [stateType]
-              [AttrRaw "rng_algorithm = #stablehlo<rng_algorithm THREE_FRY>"]
+              [AttrEnum "rng_algorithm" "THREE_FRY"]
               [stateType, outType]
     case vids of
         [vidState, vidOut] -> return (Tensor vidState, Tensor vidOut)
@@ -1954,7 +1966,7 @@ productDim dims (Tensor x) = do
     vid <- emitOpRegions "stablehlo.reduce"
             [x, oneVid]
             [inType, elemType]
-            [AttrRaw $ "dimensions = array<i64: " <> T.intercalate ", " [T.pack (show d) | d <- dims] <> ">"]
+            [AttrIntList "dimensions" (fromIntegral <$> dims)]
             [Region [redBlock]]
             outType
     return (Tensor vid)
@@ -2093,18 +2105,16 @@ einsum spec (Tensor x) (Tensor y) = do
         inType1         = tensorType (Proxy @s1) (Proxy @d)
         inType2         = tensorType (Proxy @s2) (Proxy @d)
         outType         = tensorType (Proxy @sOut) (Proxy @d)
-        batchAttr       = AttrString "batching_dims"
-                            ("[" <> T.intercalate ", " (fmap (T.pack . show) lhsBatch) <> "] x ["
-                               <> T.intercalate ", " (fmap (T.pack . show) rhsBatch) <> "]")
-        contractingAttr = AttrString "contracting_dims"
-                            ("[" <> T.intercalate ", " (fmap (T.pack . show) lhsContract) <> "] x ["
-                               <> T.intercalate ", " (fmap (T.pack . show) rhsContract) <> "]")
+        batchL    = AttrIntList "lhs_batching_dimensions" lhsBatch
+        batchR    = AttrIntList "rhs_batching_dimensions" rhsBatch
+        contractL = AttrIntList "lhs_contracting_dimensions" lhsContract
+        contractR = AttrIntList "rhs_contracting_dimensions" rhsContract
         -- Validate output shape
         expectedOutShape = fmap (fromIntegral . lookupDim) out
     when (fmap fromIntegral sOutShape /= expectedOutShape) $
         error $ "einsum: output shape mismatch. Expected " ++ show expectedOutShape ++ ", got " ++ show (fmap fromIntegral sOutShape)
     vid <- emitOp "stablehlo.dot_general" [x, y] [inType1, inType2]
-            [batchAttr, contractingAttr] naturalType
+            [batchL, batchR, contractL, contractR] naturalType
     if natural == out
     then return (Tensor vid)
     else do

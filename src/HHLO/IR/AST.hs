@@ -48,6 +48,8 @@ data Attribute
     | AttrIntList Text [Int64]
     | AttrDenseElements [Integer] DType [Double]
     | AttrDict    [(Text, Attribute)]
+    | AttrEnum    Text Text      -- ^ Enum attribute: name and value.
+                                 --   Rendered as @name = #stablehlo<name VALUE>@.
     | AttrRaw     Text           -- ^ Printed verbatim (no quotes).  Needed for
                                  --   dialect attributes like @#stablehlo.gather<...>@.
     deriving (Eq, Show)

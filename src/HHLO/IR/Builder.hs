@@ -54,6 +54,7 @@ import qualified Data.Text as T
 import GHC.TypeLits
 import HHLO.Core.Types
 import HHLO.IR.AST
+import HHLO.ShapeCheck (checkModule, ShapeError(..))
 
 -- | Mutable state accumulated while building a function.
 data BuildState = BuildState
@@ -250,50 +251,74 @@ runBuilder8 name args' builderAction =
 moduleFromBuilder :: forall s d. (KnownShape s, KnownDType d) => Text -> [FuncArg] -> Builder (Tensor s d) -> Module
 moduleFromBuilder name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilder name renamed action]
+        modu = Module [runBuilder name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 -- | Create a top-level 'Module' from a two-result function produced by a builder.
 moduleFromBuilder2 :: forall s1 d1 s2 d2. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2)
                    => Text -> [FuncArg] -> Builder (Tuple2 s1 d1 s2 d2) -> Module
 moduleFromBuilder2 name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilder2 name renamed action]
+        modu = Module [runBuilder2 name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 moduleFromBuilder3 :: forall s1 d1 s2 d2 s3 d3. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3)
                    => Text -> [FuncArg] -> Builder (Tuple3 s1 d1 s2 d2 s3 d3) -> Module
 moduleFromBuilder3 name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilder3 name renamed action]
+        modu = Module [runBuilder3 name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 moduleFromBuilder4 :: forall s1 d1 s2 d2 s3 d3 s4 d4. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4)
                    => Text -> [FuncArg] -> Builder (Tuple4 s1 d1 s2 d2 s3 d3 s4 d4) -> Module
 moduleFromBuilder4 name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilder4 name renamed action]
+        modu = Module [runBuilder4 name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 moduleFromBuilder5 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5)
                    => Text -> [FuncArg] -> Builder (Tuple5 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5) -> Module
 moduleFromBuilder5 name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilder5 name renamed action]
+        modu = Module [runBuilder5 name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 moduleFromBuilder6 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6)
                    => Text -> [FuncArg] -> Builder (Tuple6 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6) -> Module
 moduleFromBuilder6 name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilder6 name renamed action]
+        modu = Module [runBuilder6 name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 moduleFromBuilder7 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7)
                    => Text -> [FuncArg] -> Builder (Tuple7 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7) -> Module
 moduleFromBuilder7 name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilder7 name renamed action]
+        modu = Module [runBuilder7 name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 moduleFromBuilder8 :: forall s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8. (KnownShape s1, KnownDType d1, KnownShape s2, KnownDType d2, KnownShape s3, KnownDType d3, KnownShape s4, KnownDType d4, KnownShape s5, KnownDType d5, KnownShape s6, KnownDType d6, KnownShape s7, KnownDType d7, KnownShape s8, KnownDType d8)
                    => Text -> [FuncArg] -> Builder (Tuple8 s1 d1 s2 d2 s3 d3 s4 d4 s5 d5 s6 d6 s7 d7 s8 d8) -> Module
 moduleFromBuilder8 name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilder8 name renamed action]
+        modu = Module [runBuilder8 name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 -- | Run a 'Builder' action and produce a multi-result 'Function' from a 'Tuple'.
 runBuilderT :: forall ss ds. TupleBuilder (Tuple ss ds) => Text -> [FuncArg] -> Builder (Tuple ss ds) -> Function
@@ -310,7 +335,10 @@ runBuilderT name args' builderAction =
 moduleFromBuilderT :: forall ss ds. TupleBuilder (Tuple ss ds) => Text -> [FuncArg] -> Builder (Tuple ss ds) -> Module
 moduleFromBuilderT name args' action =
     let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
-    in Module [runBuilderT name renamed action]
+        modu = Module [runBuilderT name renamed action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
 
 -- | Emit a 'stablehlo.custom_call' operation.
 --

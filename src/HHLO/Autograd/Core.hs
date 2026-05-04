@@ -198,7 +198,7 @@ breshape (BTensor x inType) outType = do
 bbroadcastInDim :: BTensor -> [Int64] -> TensorType -> Builder BTensor
 bbroadcastInDim (BTensor x inType) dims outType = do
     vid <- emitOp "stablehlo.broadcast_in_dim" [x] [inType]
-        [AttrIntList "dims" (fromIntegral <$> dims)] outType
+        [AttrIntList "broadcast_dimensions" (fromIntegral <$> dims)] outType
     return (BTensor vid outType)
 
 -- | Element-wise selection between two BTensors based on a boolean predicate.
@@ -210,18 +210,18 @@ bselect (BTensor p predType) (BTensor t _) (BTensor f _) outType = do
 -- | Slice a BTensor (forward operation wrapper).
 bslice :: BTensor -> [Int64] -> [Int64] -> [Int64] -> TensorType -> Builder BTensor
 bslice (BTensor x inType) start limit stride outType = do
-    let startAttr = AttrRaw $ "start_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> start) <> ">"
-        limitAttr = AttrRaw $ "limit_indices = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> limit) <> ">"
-        strideAttr = AttrRaw $ "strides = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> stride) <> ">"
+    let startAttr  = AttrIntList "start_indices" start
+        limitAttr  = AttrIntList "limit_indices" limit
+        strideAttr = AttrIntList "strides" stride
     vid <- emitOp "stablehlo.slice" [x] [inType] [startAttr, limitAttr, strideAttr] outType
     return (BTensor vid outType)
 
 -- | Pad a BTensor with edge and interior padding.
 bpad :: BTensor -> BTensor -> [Int64] -> [Int64] -> [Int64] -> TensorType -> Builder BTensor
 bpad (BTensor x inType) (BTensor padVal padType) low high interior outType = do
-    let lowAttr  = AttrRaw $ "edge_padding_low = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> low) <> ">"
-        highAttr = AttrRaw $ "edge_padding_high = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> high) <> ">"
-        intAttr  = AttrRaw $ "interior_padding = array<i64: " <> T.intercalate ", " ((T.pack . show) <$> interior) <> ">"
+    let lowAttr  = AttrIntList "edge_padding_low" low
+        highAttr = AttrIntList "edge_padding_high" high
+        intAttr  = AttrIntList "interior_padding" interior
     vid <- emitOp "stablehlo.pad" [x, padVal] [inType, padType] [lowAttr, highAttr, intAttr] outType
     return (BTensor vid outType)
 
@@ -250,7 +250,7 @@ breduceSum (BTensor x inType) dims outType = do
     vid <- emitOpRegions "stablehlo.reduce"
             [x, zeroVid]
             [inType, elemType]
-            [AttrRaw $ "dimensions = array<i64: " <> T.intercalate ", " [T.pack (show d) | d <- dims] <> ">"]
+            [AttrIntList "dimensions" (map fromIntegral dims)]
             [Region [redBlock]]
             outType
     return (BTensor vid outType)
@@ -345,10 +345,8 @@ breduceWindowAdd (BTensor input inType) (BTensor initVal initType) windowDims st
                     [elemType, elemType] [] elemType
         emitReturn [sumVid] [elemType]
 
-    let windowAttr  = AttrRaw $ "window_dimensions = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> windowDims) <> ">"
-        strideAttr  = AttrRaw $ "window_strides = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> strides) <> ">"
+    let windowAttr  = AttrIntList "window_dimensions" windowDims
+        strideAttr  = AttrIntList "window_strides" strides
         paddingAttr = AttrRaw $ "padding = dense<[["
             <> T.intercalate "], [" (padPair <$> padding) <> "]]> : tensor<"
             <> T.pack (show (length padding)) <> "x2xi64>"
@@ -377,10 +375,8 @@ breduceWindowMax (BTensor input inType) (BTensor initVal initType) windowDims st
                     [elemType, elemType] [] elemType
         emitReturn [maxVid] [elemType]
 
-    let windowAttr  = AttrRaw $ "window_dimensions = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> windowDims) <> ">"
-        strideAttr  = AttrRaw $ "window_strides = array<i64: "
-            <> T.intercalate ", " ((T.pack . show) <$> strides) <> ">"
+    let windowAttr  = AttrIntList "window_dimensions" windowDims
+        strideAttr  = AttrIntList "window_strides" strides
         paddingAttr = AttrRaw $ "padding = dense<[["
             <> T.intercalate "], [" (padPair <$> padding) <> "]]> : tensor<"
             <> T.pack (show (length padding)) <> "x2xi64>"

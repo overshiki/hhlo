@@ -7,6 +7,8 @@ module HHLO.IR.Pretty
     ) where
 
 import Data.Int (Int64)
+import Data.List (elemIndex)
+import Data.Maybe (catMaybes, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
@@ -154,27 +156,15 @@ instance Pretty Operation where
         <> (if null attrs then mempty else " " <> prettyAttrs attrs)
         <> " : " <> prettyResultType operandTypes resultTypes
     pretty (Operation "stablehlo.transpose" operands operandTypes attrs regions results resultTypes) =
-        -- Generic form with array<i64: ...> for permutation (PJRT v1.16.0 compat).
-        let attrs' = map fixPermAttr attrs
-        in prettyResultVids results <> " = \"stablehlo.transpose\"("
+        prettyResultVids results <> " = \"stablehlo.transpose\"("
            <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
-           <> (if null attrs' then mempty else " " <> prettyAttrs attrs')
+           <> (if null attrs then mempty else " " <> prettyAttrs attrs)
            <> " : " <> prettyResultType operandTypes resultTypes
-      where
-        fixPermAttr (AttrIntList "permutation" vals) =
-            AttrRaw $ "permutation = array<i64: " <> T.intercalate ", " (map (T.pack . show) vals) <> ">"
-        fixPermAttr a = a
     pretty (Operation "stablehlo.reverse" operands operandTypes attrs regions results resultTypes) =
-        -- Generic form with array<i64: ...> for dimensions (PJRT v1.16.0 compat).
-        let attrs' = map fixRevAttr attrs
-        in prettyResultVids results <> " = \"stablehlo.reverse\"("
+        prettyResultVids results <> " = \"stablehlo.reverse\"("
            <> mconcat (intersperse (", ") (map valueRefBuilder operands)) <> ")"
-           <> (if null attrs' then mempty else " " <> prettyAttrs attrs')
+           <> (if null attrs then mempty else " " <> prettyAttrs attrs)
            <> " : " <> prettyResultType operandTypes resultTypes
-      where
-        fixRevAttr (AttrIntList "dimensions" vals) =
-            AttrRaw $ "dimensions = array<i64: " <> T.intercalate ", " (map (T.pack . show) vals) <> ">"
-        fixRevAttr a = a
     pretty (Operation "stablehlo.concatenate" operands operandTypes attrs regions results resultTypes) =
         -- Generic form (custom form syntax varies across parser versions).
         prettyResultVids results <> " = \"stablehlo.concatenate\"("
@@ -255,6 +245,15 @@ prettyAttrsForOp _ [AttrDenseElements shp dt vals] =
     " dense<" <> denseElements shp dt vals <> ">"
 prettyAttrsForOp "stablehlo.broadcast_in_dim" [AttrIntList _name vals] =
     ", dims = [" <> fromText (T.intercalate ", " (map (T.pack . show) vals)) <> "]"
+prettyAttrsForOp "stablehlo.broadcast_in_dim" attrs =
+    -- Handle broadcast_in_dim with multiple attrs (e.g. broadcast_dimensions + others)
+    let bd = lookupAttrIntList "broadcast_dimensions" attrs
+        rest = filter (not . isBroadcastAttr) attrs
+    in (if null bd then mempty else ", dims = [" <> fromText (T.intercalate ", " (map (T.pack . show) bd)) <> "]")
+       <> (if null rest then mempty else " " <> prettyAttrs rest)
+  where
+    isBroadcastAttr (AttrIntList "broadcast_dimensions" _) = True
+    isBroadcastAttr _ = False
 prettyAttrsForOp _ attrs = " " <> prettyAttrs attrs
 
 -- | Pretty-print attributes for 'stablehlo.reduce'.
@@ -281,38 +280,127 @@ lookupAttrString name = foldr f ""
     f (AttrString n s) acc | n == name = s <> acc
     f _ acc = acc
 
+lookupAttrInt :: Text -> [Attribute] -> Maybe Int64
+lookupAttrInt name = listToMaybe . foldr f []
+  where
+    f (AttrInt n v) acc | n == name = v : acc
+    f _ acc = acc
+
+-- | Derive the 'dim_numbers' string for convolution from canonical attrs.
+prettyConvDimNumbers :: [Attribute] -> Text
+prettyConvDimNumbers attrs =
+    let ib  = lookupAttrInt "input_batch_dimension" attrs
+        if_ = lookupAttrInt "input_feature_dimension" attrs
+        isd = lookupAttrIntList "input_spatial_dimensions" attrs
+        kif = lookupAttrInt "kernel_input_feature_dimension" attrs
+        kof = lookupAttrInt "kernel_output_feature_dimension" attrs
+        ksd = lookupAttrIntList "kernel_spatial_dimensions" attrs
+        ob  = lookupAttrInt "output_batch_dimension" attrs
+        of_ = lookupAttrInt "output_feature_dimension" attrs
+        osd = lookupAttrIntList "output_spatial_dimensions" attrs
+    in if any null [isd, ksd, osd] || any (== Nothing) [ib, if_, kif, kof, ob, of_]
+       then ""
+       else dimSpec 'b' (maybe 0 id ib) isd 'f' (maybe 0 id if_)
+            <> "x"
+            <> dimSpec 'i' (maybe 0 id kif) ksd 'o' (maybe 0 id kof)
+            <> "->"
+            <> dimSpec 'b' (maybe 0 id ob) osd 'f' (maybe 0 id of_)
+  where
+    dimSpec :: Char -> Int64 -> [Int64] -> Char -> Int64 -> Text
+    dimSpec bChar bIdx spatial outChar outIdx =
+        let maxPos = maximum (fromIntegral bIdx : fromIntegral outIdx : map fromIntegral spatial)
+            chars  = map (charAt maxPos) [0..maxPos]
+        in "[" <> T.intercalate ", " (map T.pack chars) <> "]"
+      where
+        charAt _ i | i == fromIntegral bIdx   = [bChar]
+        charAt _ i | i == fromIntegral outIdx = [outChar]
+        charAt _ i = case elemIndex i (map fromIntegral spatial) of
+            Just idx -> show (idx :: Int)
+            Nothing  -> "?"
+
+-- | Derive the 'window' string for convolution from canonical attrs.
+prettyConvWindow :: [Attribute] -> Text
+prettyConvWindow attrs =
+    let strides   = lookupAttrIntList "window_strides" attrs
+        padding   = lookupAttrIntList "padding" attrs
+        lhsDil    = lookupAttrIntList "lhs_dilation" attrs
+        rhsDil    = lookupAttrIntList "rhs_dilation" attrs
+        parts     = catMaybes
+            [ if null strides then Nothing else Just $ "stride = [" <> T.intercalate ", " (map (T.pack . show) strides) <> "]"
+            , if null padding || odd (length padding) then Nothing else Just $ "pad = [" <> T.intercalate ", " (padPairs padding) <> "]"
+            , if null lhsDil then Nothing else Just $ "lhs_dilate = [" <> T.intercalate ", " (map (T.pack . show) lhsDil) <> "]"
+            , if null rhsDil then Nothing else Just $ "rhs_dilate = [" <> T.intercalate ", " (map (T.pack . show) rhsDil) <> "]"
+            ]
+    in if null parts then "" else "{" <> T.intercalate ", " parts <> "}"
+  where
+    padPairs [] = []
+    padPairs (a:b:rest) = ("[" <> T.pack (show a) <> ", " <> T.pack (show b) <> "]") : padPairs rest
+    padPairs _ = []
+
 -- | Pretty-print attributes for 'stablehlo.convolution'.
--- Extracts 'dim_numbers' and 'window' from the custom string attributes,
--- then renders the remaining attrs in the standard dictionary.
+-- Derives the custom 'dim_numbers' and 'window' strings from canonical
+-- structured attributes, then renders the remaining attrs in the standard dictionary.
 prettyConvAttrs :: [Attribute] -> Builder
 prettyConvAttrs attrs =
-    let dimNums   = lookupAttrString "dim_numbers" attrs
-        window    = lookupAttrString "window" attrs
-        rest      = filter (not . isCustomConvAttr) attrs
-        custom    = (if T.null dimNums then mempty else " dim_numbers = " <> fromText dimNums <> ",")
-                 <> (if T.null window  then mempty else " window = " <> fromText window)
-        dict      = if null rest then mempty else " " <> prettyAttrs rest
+    let dimTxt  = if T.null canonDim then lookupAttrString "dim_numbers" attrs else canonDim
+        winTxt  = if T.null canonWin then lookupAttrString "window" attrs else canonWin
+        rest    = filter (not . isConvDimOrWindowAttr) attrs
+        custom  = (if T.null dimTxt then mempty else " dim_numbers = " <> fromText dimTxt <> ",")
+               <> (if T.null winTxt then mempty else " window = " <> fromText winTxt)
+        dict    = if null rest then mempty else " " <> prettyAttrs rest
     in custom <> dict
   where
-    isCustomConvAttr (AttrString "dim_numbers" _) = True
-    isCustomConvAttr (AttrString "window" _)      = True
-    isCustomConvAttr _                            = False
+    canonDim = prettyConvDimNumbers attrs
+    canonWin = prettyConvWindow attrs
+    isConvDimOrWindowAttr (AttrInt "input_batch_dimension" _)         = True
+    isConvDimOrWindowAttr (AttrInt "input_feature_dimension" _)       = True
+    isConvDimOrWindowAttr (AttrIntList "input_spatial_dimensions" _)      = True
+    isConvDimOrWindowAttr (AttrInt "kernel_input_feature_dimension" _)  = True
+    isConvDimOrWindowAttr (AttrInt "kernel_output_feature_dimension" _) = True
+    isConvDimOrWindowAttr (AttrIntList "kernel_spatial_dimensions" _)     = True
+    isConvDimOrWindowAttr (AttrInt "output_batch_dimension" _)        = True
+    isConvDimOrWindowAttr (AttrInt "output_feature_dimension" _)      = True
+    isConvDimOrWindowAttr (AttrIntList "output_spatial_dimensions" _)     = True
+    isConvDimOrWindowAttr (AttrIntList "window_strides" _)                = True
+    isConvDimOrWindowAttr (AttrIntList "padding" _)                       = True
+    isConvDimOrWindowAttr (AttrIntList "lhs_dilation" _)                  = True
+    isConvDimOrWindowAttr (AttrIntList "rhs_dilation" _)                  = True
+    isConvDimOrWindowAttr (AttrString "dim_numbers" _)                    = True
+    isConvDimOrWindowAttr (AttrString "window" _)                         = True
+    isConvDimOrWindowAttr _                                               = False
 
 -- | Pretty-print attributes for 'stablehlo.dot_general'.
--- Extracts 'batching_dims' and 'contracting_dims' from the custom string attributes.
+-- Combines canonical lhs/rhs batching and contracting dimensions into the
+-- standard StableHLO assembly format.
 prettyDotGeneralAttrs :: [Attribute] -> Builder
 prettyDotGeneralAttrs attrs =
-    let batch       = lookupAttrString "batching_dims" attrs
-        contract    = lookupAttrString "contracting_dims" attrs
-        rest        = filter (not . isCustomDotAttr) attrs
-        custom      = (if T.null batch    then mempty else "\n    batching_dims = " <> fromText batch <> ",")
-                   <> (if T.null contract then mempty else "\n    contracting_dims = " <> fromText contract)
-        dict        = if null rest then mempty else "\n    " <> prettyAttrs rest
-    in custom <> dict
+    let batchL    = lookupAttrIntList "lhs_batching_dimensions" attrs
+        batchR    = lookupAttrIntList "rhs_batching_dimensions" attrs
+        contractL = lookupAttrIntList "lhs_contracting_dimensions" attrs
+        contractR = lookupAttrIntList "rhs_contracting_dimensions" attrs
+        rest      = filter (not . isDotDimAttr) attrs
+        batchTxt  = if null batchL || null batchR
+                       then mempty
+                       else "\n    batching_dims = ["
+                            <> fromText (T.intercalate ", " (map (T.pack . show) batchL))
+                            <> "] x ["
+                            <> fromText (T.intercalate ", " (map (T.pack . show) batchR))
+                            <> "],"
+        contractTxt = if null contractL || null contractR
+                         then mempty
+                         else "\n    contracting_dims = ["
+                              <> fromText (T.intercalate ", " (map (T.pack . show) contractL))
+                              <> "] x ["
+                              <> fromText (T.intercalate ", " (map (T.pack . show) contractR))
+                              <> "]"
+        dict      = if null rest then mempty else "\n    " <> prettyAttrs rest
+    in batchTxt <> contractTxt <> dict
   where
-    isCustomDotAttr (AttrString "batching_dims" _)    = True
-    isCustomDotAttr (AttrString "contracting_dims" _) = True
-    isCustomDotAttr _                                 = False
+    isDotDimAttr (AttrIntList "lhs_batching_dimensions" _)     = True
+    isDotDimAttr (AttrIntList "rhs_batching_dimensions" _)     = True
+    isDotDimAttr (AttrIntList "lhs_contracting_dimensions" _)  = True
+    isDotDimAttr (AttrIntList "rhs_contracting_dimensions" _)  = True
+    isDotDimAttr _                                             = False
 
 -- | Pretty-print attributes for 'stablehlo.batch_norm_inference'.
 -- Uses the generic op format with <{...}> around the attributes.
@@ -393,7 +481,9 @@ prettyAttr (AttrBool name False) =
 prettyAttr (AttrString name s) =
     fromText name <> " = \"" <> fromText s <> "\""
 prettyAttr (AttrIntList name vals) =
-    fromText name <> " = [" <> fromText (T.intercalate ", " (map (T.pack . show) vals)) <> "]"
+    fromText name <> " = array<i64: " <> fromText (T.intercalate ", " (map (T.pack . show) vals)) <> ">"
+prettyAttr (AttrEnum name val) =
+    fromText name <> " = #stablehlo<" <> fromText name <> " " <> fromText val <> ">"
 prettyAttr (AttrDenseElements shape dtype vals) =
     "value = dense<" <> denseElements shape dtype vals <> "> : " <> pretty (TensorType shape dtype)
 prettyAttr (AttrDict pairs) =
