@@ -252,7 +252,25 @@ matmul (Tensor x) (Tensor y) = do
     let inType1 = tensorType (Proxy @s1) (Proxy @d)
         inType2 = tensorType (Proxy @s2) (Proxy @d)
         outType = tensorType (Proxy @(MatMulShape s1 s2)) (Proxy @d)
-    vid <- emitOp "stablehlo.dot" [x, y] [inType1, inType2] [] outType
+        s1Shape = shapeVal (Proxy @s1)
+        s2Shape = shapeVal (Proxy @s2)
+        rank1 = length s1Shape
+        rank2 = length s2Shape
+        (batchL, batchR, contractL, contractR) = case (rank1, rank2) of
+            (1, 2) -> ([], [], [0], [0])
+            (2, 1) -> ([], [], [1], [0])
+            (2, 2) -> ([], [], [1], [0])
+            (3, 2) -> ([], [], [2], [0])
+            (3, 3) -> ([0], [0], [2], [1])
+            (4, 4) -> ([0,1], [0,1], [3], [2])
+            _ -> error $ "matmul: unsupported ranks " ++ show rank1 ++ "x" ++ show rank2
+        attrs =
+            [ AttrIntList "lhs_batching_dimensions" (fmap fromIntegral batchL)
+            , AttrIntList "rhs_batching_dimensions" (fmap fromIntegral batchR)
+            , AttrIntList "lhs_contracting_dimensions" (fmap fromIntegral contractL)
+            , AttrIntList "rhs_contracting_dimensions" (fmap fromIntegral contractR)
+            ]
+    vid <- emitOp "stablehlo.dot_general" [x, y] [inType1, inType2] attrs outType
     return (Tensor vid)
 
 -- | General dot product with explicit batch and contracting dimensions.

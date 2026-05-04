@@ -128,7 +128,7 @@ tests = testGroup "EDSL.Ops"
             assertBool "stablehlo.iota" $ "stablehlo.iota" `T.isInfixOf` rendered
         ]
     , testGroup "Matmul"
-        [ testCase "matmul" $ do
+        [ testCase "matmul 2D" $ do
             let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
                     [ FuncArg "arg0" (TensorType [2, 3] F32)
                     , FuncArg "arg1" (TensorType [3, 2] F32)
@@ -139,7 +139,39 @@ tests = testGroup "EDSL.Ops"
                         z <- matmul x y
                         return z
             let rendered = render modu
-            assertBool "stablehlo.dot" $ "stablehlo.dot" `T.isInfixOf` rendered
+            assertBool "stablehlo.dot_general" $ "stablehlo.dot_general" `T.isInfixOf` rendered
+            assertBool "contracting_dims = [1] x [0]"
+                $ "contracting_dims = [1] x [0]" `T.isInfixOf` rendered
+        , testCase "matmul 3D batched" $ do
+            let modu = moduleFromBuilder @'[2, 2, 2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2, 2, 3] F32)
+                    , FuncArg "arg1" (TensorType [2, 3, 2] F32)
+                    ]
+                    $ do
+                        x <- arg @'[2, 2, 3] @'F32
+                        y <- arg @'[2, 3, 2] @'F32
+                        z <- matmul x y
+                        return z
+            let rendered = render modu
+            assertBool "stablehlo.dot_general" $ "stablehlo.dot_general" `T.isInfixOf` rendered
+            assertBool "batching_dims = [0] x [0]"
+                $ "batching_dims = [0] x [0]" `T.isInfixOf` rendered
+            assertBool "contracting_dims = [2] x [1]"
+                $ "contracting_dims = [2] x [1]" `T.isInfixOf` rendered
+        , testCase "matmul 3D x 2D broadcast batch" $ do
+            let modu = moduleFromBuilder @'[2, 2, 2] @'F32 "main"
+                    [ FuncArg "arg0" (TensorType [2, 2, 3] F32)
+                    , FuncArg "arg1" (TensorType [3, 2] F32)
+                    ]
+                    $ do
+                        x <- arg @'[2, 2, 3] @'F32
+                        y <- arg @'[3, 2] @'F32
+                        z <- matmul x y
+                        return z
+            let rendered = render modu
+            assertBool "stablehlo.dot_general" $ "stablehlo.dot_general" `T.isInfixOf` rendered
+            assertBool "contracting_dims = [2] x [0]"
+                $ "contracting_dims = [2] x [0]" `T.isInfixOf` rendered
         , testCase "dotGeneral" $ do
             let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
                     [ FuncArg "arg0" (TensorType [2, 3] F32)
@@ -162,7 +194,7 @@ tests = testGroup "EDSL.Ops"
                         z <- linear x w b
                         return z
             let rendered = render modu
-            assertBool "stablehlo.dot" $ "stablehlo.dot" `T.isInfixOf` rendered
+            assertBool "stablehlo.dot_general" $ "stablehlo.dot_general" `T.isInfixOf` rendered
             assertBool "stablehlo.add" $ "stablehlo.add" `T.isInfixOf` rendered
         ]
     , testGroup "Reductions"

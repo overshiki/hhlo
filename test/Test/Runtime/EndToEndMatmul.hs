@@ -59,6 +59,27 @@ tests = testGroup "EndToEnd.Matmul"
         result <- fromDeviceF32 api bufOut 2
         -- [1*0.5+2*0.5+3*0.5, 1*0.5+2*0.5+3*0.5] = [3, 3]
         result @?= V.fromList [3.0, 3.0]
+    , testCase "matmul 3D batched" $ withPJRTCPU $ \api client -> do
+        let modu = moduleFromBuilder @'[2, 2, 2] @'F32 "main"
+                [ FuncArg "arg0" (TensorType [2, 2, 3] F32)
+                , FuncArg "arg1" (TensorType [2, 3, 2] F32)
+                ]
+                $ do
+                    x <- arg @'[2, 2, 3] @'F32
+                    y <- arg @'[2, 3, 2] @'F32
+                    z <- matmul x y
+                    return z
+        exec <- compile api client (render modu)
+        let a = V.fromList [1,2,3, 4,5,6, 1,2,3, 4,5,6] :: V.Vector Float
+            b = V.fromList [1,2, 3,4, 5,6, 1,2, 3,4, 5,6] :: V.Vector Float
+        bufA <- toDeviceF32 api client a [2, 2, 3]
+        bufB <- toDeviceF32 api client b [2, 3, 2]
+        [bufOut] <- execute api exec [bufA, bufB]
+        result <- fromDeviceF32 api bufOut 8
+        -- Batch 0: [[1,2,3],[4,5,6]] . [[1,2],[3,4],[5,6]] = [[22,28],[49,64]]
+        -- Batch 1: same
+        let expected = V.fromList [22,28,49,64, 22,28,49,64]
+        result @?= expected
     , testCase "linearBatched" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
                 [ FuncArg "arg0" (TensorType [2, 3] F32) ]

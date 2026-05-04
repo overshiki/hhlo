@@ -23,6 +23,7 @@ module HHLO.Autograd.Core
     , bbroadcastInDim
     , breduceSum
     , bdot
+    , bdotGeneral
     , babs
     , btanh
     , bmaximum
@@ -259,6 +260,18 @@ breduceSum (BTensor x inType) dims outType = do
 bdot :: BTensor -> BTensor -> TensorType -> Builder BTensor
 bdot (BTensor x t1) (BTensor y t2) outType = do
     vid <- emitOp "stablehlo.dot" [x, y] [t1, t2] [] outType
+    return (BTensor vid outType)
+
+-- | General dot product of two BTensors with explicit dimension numbers.
+bdotGeneral :: BTensor -> BTensor -> [Int64] -> [Int64] -> [Int64] -> [Int64] -> TensorType -> Builder BTensor
+bdotGeneral (BTensor lhs lhsType) (BTensor rhs rhsType) batchL batchR contractL contractR outType = do
+    let attrs =
+            [ AttrIntList "lhs_batching_dimensions" batchL
+            , AttrIntList "rhs_batching_dimensions" batchR
+            , AttrIntList "lhs_contracting_dimensions" contractL
+            , AttrIntList "rhs_contracting_dimensions" contractR
+            ]
+    vid <- emitOp "stablehlo.dot_general" [lhs, rhs] [lhsType, rhsType] attrs outType
     return (BTensor vid outType)
 
 -- | Element-wise absolute value.

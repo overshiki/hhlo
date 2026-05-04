@@ -7,7 +7,7 @@ module HHLO.Autograd.Rules
     ) where
 
 import Data.Int (Int64)
-import Data.List (sortOn, zipWith4)
+import Data.List (sortOn, zipWith4, (\\))
 import Data.Maybe (fromMaybe, isNothing, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -45,6 +45,7 @@ backwardStep cmap op
         "stablehlo.broadcast_in_dim" -> vjpBroadcastInDim op resultBars cmap
         "stablehlo.reduce"       -> vjpReduce op resultBars cmap
         "stablehlo.dot"          -> vjpDot op resultBars cmap
+        "stablehlo.dot_general"  -> vjpDotGeneral op resultBars cmap
         "stablehlo.select"       -> vjpSelect op resultBars cmap
         "stablehlo.slice"        -> vjpSlice op resultBars cmap
         "stablehlo.pad"          -> vjpPad op resultBars cmap
@@ -363,6 +364,41 @@ vjpDot op resultBars cmap = case getResultBar resultBars of
                 accumulate cmap' (btVid y) db
             else
                 error "autograd-hhlo: dot VJP only supports 2-D matrices for now"
+    Nothing -> return cmap
+
+vjpDotGeneral :: Operation -> [Maybe BTensor] -> Map ValueId BTensor -> Builder (Map ValueId BTensor)
+vjpDotGeneral op resultBars cmap = case getResultBar resultBars of
+    Just bar -> do
+        let x = operandBT op 0
+            y = operandBT op 1
+            xType = btType x
+            yType = btType y
+            attrs = opAttributes op
+            rank1 = length (ttShape xType)
+            rank2 = length (ttShape yType)
+            batchL = fromMaybe [] $ lookupAttrIntList "lhs_batching_dimensions" attrs
+            batchR = fromMaybe [] $ lookupAttrIntList "rhs_batching_dimensions" attrs
+            contractL = fromMaybe [] $ lookupAttrIntList "lhs_contracting_dimensions" attrs
+            contractR = fromMaybe [] $ lookupAttrIntList "rhs_contracting_dimensions" attrs
+            lhsOutDims = ([0 .. rank1 - 1] \\ map fromIntegral batchL) \\ map fromIntegral contractL
+            rhsOutDims = ([0 .. rank2 - 1] \\ map fromIntegral batchR) \\ map fromIntegral contractR
+            nBatch = length batchL
+            nLhsOut = length lhsOutDims
+            nRhsOut = length rhsOutDims
+            -- dA = dot_general(dC, B)
+            batchL_dA = map fromIntegral [0 .. nBatch - 1]
+            batchR_dA = batchR
+            contractL_dA = map fromIntegral [nBatch + nLhsOut .. nBatch + nLhsOut + nRhsOut - 1]
+            contractR_dA = map fromIntegral rhsOutDims
+            -- dB = dot_general(A, dC)
+            batchL_dB = batchL
+            batchR_dB = map fromIntegral [0 .. nBatch - 1]
+            contractL_dB = map fromIntegral lhsOutDims
+            contractR_dB = map fromIntegral [nBatch .. nBatch + nLhsOut - 1]
+        da <- bdotGeneral bar y batchL_dA batchR_dA contractL_dA contractR_dA xType
+        db <- bdotGeneral x bar batchL_dB batchR_dB contractL_dB contractR_dB yType
+        cmap' <- accumulate cmap (btVid x) da
+        accumulate cmap' (btVid y) db
     Nothing -> return cmap
 
 -- ---------------------------------------------------------------------------

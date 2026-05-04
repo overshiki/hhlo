@@ -77,6 +77,21 @@ tests = testGroup "EndToEnd.Autograd"
         let expected = V.fromList [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
         assertBool "grad close" $
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
+    , testCase "grad matmul 3D batched" $ withPJRTCPU $ \api client -> do
+        let f x = do
+                w <- constant @'[2, 3, 2] @'F32 0.5
+                y <- matmul x w
+                sumAll y
+            gradModu = gradModule @'[2, 2, 3] @'F32 f
+        exec <- compile api client (render gradModu)
+        let inp = V.fromList [1.0..12.0]
+        bufIn <- toDeviceF32 api client inp [2, 2, 3]
+        [bufOut] <- execute api exec [bufIn]
+        result <- fromDeviceF32 api bufOut 12
+        -- grad = sum over N dim of W = [0.5+0.5, 0.5+0.5, 0.5+0.5] for each element
+        let expected = V.fromList (replicate 12 1.0)
+        assertBool "grad 3D batched close" $
+            V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     , testCase "grad avgPool" $ withPJRTCPU $ \api client -> do
         let f x = do
                 let windowDims = v4 1 2 2 1
