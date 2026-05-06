@@ -25,7 +25,7 @@ tests :: TestTree
 tests = testGroup "EndToEnd.DataMovement"
     [ testCase "slice 1D" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [5] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 5] F32) ]
                 $ do
                     x <- arg @'[5] @'F32
                     y <- slice x (v1 1) (v1 4) (v1 1)
@@ -38,7 +38,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [1.0, 2.0, 3.0]
     , testCase "slice 2D" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [4, 4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 4, Just 4] F32) ]
                 $ do
                     x <- arg @'[4, 4] @'F32
                     y <- slice @'[4, 4] @'[2, 2] x (v2 1 1) (v2 3 3) (v2 1 1)
@@ -51,7 +51,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [6, 7, 10, 11]
     , testCase "slice with stride" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [5] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 5] F32) ]
                 $ do
                     x <- arg @'[5] @'F32
                     y <- slice x (v1 0) (v1 4) (v1 2)
@@ -64,7 +64,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [0.0, 2.0]
     , testCase "pad 2D symmetric" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[4, 4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32) ]
                 $ do
                     x <- arg @'[2, 2] @'F32
                     padVal <- constant @'[] @'F32 0.0
@@ -78,7 +78,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [0,0,0,0, 0,1,2,0, 0,3,4,0, 0,0,0,0]
     , testCase "pad edge" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2] F32) ]
                 $ do
                     x <- arg @'[2] @'F32
                     padVal <- constant @'[] @'F32 0.0
@@ -93,7 +93,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [0.0, 1.0, 2.0, 0.0]
     , testCase "gather rows" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3, 4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3, Just 4] F32) ]
                 $ do
                     x <- arg @'[3, 4] @'F32
                     idx <- constant @'[2] @'I64 0
@@ -109,9 +109,9 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= expected
     , testCase "select true" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
-                , FuncArg "pred" (TensorType [2, 2] Bool)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "pred" (TensorType [Just 2, Just 2] Bool)
                 ]
                 $ do
                     t <- arg @'[2, 2] @'F32
@@ -131,9 +131,9 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= a
     , testCase "select false" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
-                , FuncArg "pred" (TensorType [2, 2] Bool)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "pred" (TensorType [Just 2, Just 2] Bool)
                 ]
                 $ do
                     t <- arg @'[2, 2] @'F32
@@ -153,7 +153,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= b
     , testCase "convert f32 to f32" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2] F32) ]
                 $ do
                     x <- arg @'[2] @'F32
                     y <- convert x
@@ -166,8 +166,8 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= inp
     , testCase "conditional true" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32)
-                , FuncArg "arg1" (TensorType [2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2] F32)
                 , FuncArg "pred" (TensorType [] Bool)
                 ]
                 $ do
@@ -188,8 +188,8 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= a
     , testCase "conditional false" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32)
-                , FuncArg "arg1" (TensorType [2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2] F32)
                 , FuncArg "pred" (TensorType [] Bool)
                 ]
                 $ do
@@ -210,7 +210,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= b
     , testCase "map square" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3] F32) ]
                 $ do
                     x <- arg @'[3] @'F32
                     y <- map [x] [0] $ \[a] -> multiply a a
@@ -223,7 +223,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [1.0, 4.0, 9.0]
     , testCase "dynamicSlice" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 4] F32) ]
                 $ do
                     x <- arg @'[4] @'F32
                     idx <- constant @'[] @'I64 1
@@ -237,8 +237,8 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [1.0, 2.0]
     , testCase "logicalAnd" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[3] @'Bool "main"
-                [ FuncArg "arg0" (TensorType [3] Bool)
-                , FuncArg "arg1" (TensorType [3] Bool)
+                [ FuncArg "arg0" (TensorType [Just 3] Bool)
+                , FuncArg "arg1" (TensorType [Just 3] Bool)
                 ]
                 $ do
                     a <- arg @'[3] @'Bool
@@ -255,8 +255,8 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [1, 0, 0]
     , testCase "logicalOr" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[3] @'Bool "main"
-                [ FuncArg "arg0" (TensorType [3] Bool)
-                , FuncArg "arg1" (TensorType [3] Bool)
+                [ FuncArg "arg0" (TensorType [Just 3] Bool)
+                , FuncArg "arg1" (TensorType [Just 3] Bool)
                 ]
                 $ do
                     a <- arg @'[3] @'Bool
@@ -273,7 +273,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [1, 1, 0]
     , testCase "logicalNot" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[3] @'Bool "main"
-                [ FuncArg "arg0" (TensorType [3] Bool) ]
+                [ FuncArg "arg0" (TensorType [Just 3] Bool) ]
                 $ do
                     a <- arg @'[3] @'Bool
                     b <- logicalNot a
@@ -286,7 +286,7 @@ tests = testGroup "EndToEnd.DataMovement"
         result @?= V.fromList [0, 1, 0]
     , testCase "topK" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 4] F32) ]
                 $ do
                     x <- arg @'[4] @'F32
                     y <- topK @'[4] @'[2] 2 0 x

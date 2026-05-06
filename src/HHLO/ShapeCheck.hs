@@ -10,11 +10,14 @@
 module HHLO.ShapeCheck
     ( checkModule
     , ShapeError(..)
+    , shapeMatch
+    , shapeElems
+    , shapeDim
     ) where
 
 import Control.Monad (foldM, forM, forM_, mapM_, when)
 import Data.Int (Int64)
-import Data.List (sort, nub, intersperse)
+import Data.List (sort, nub, intersperse, elemIndex)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -167,6 +170,10 @@ checkOp _funcName env op = case opName op of
     "stablehlo.convolution"    -> checkConv env op
     "stablehlo.slice"          -> checkSlice env op
     "stablehlo.dynamic_slice"  -> checkDynamicSlice env op
+    "stablehlo.dynamic_update_slice" -> checkDynamicUpdateSlice env op
+    "stablehlo.dynamic_reshape" -> checkDynamicReshape env op
+    "stablehlo.get_dimension_size" -> checkGetDimensionSize env op
+    "stablehlo.set_dimension_size" -> checkSetDimensionSize env op
     "stablehlo.pad"            -> checkPad env op
     "stablehlo.concatenate"    -> checkConcatenate env op
     "stablehlo.transpose"      -> checkTranspose env op
@@ -230,7 +237,7 @@ checkCompare env op = do
     case inTypes of
         [] -> return ()
         (t:ts) -> forM_ ts $ \t' ->
-            when (ttShape t /= ttShape t') $
+            when (not (shapeMatch (ttShape t) (ttShape t'))) $
                 Left $ ShapeMismatch "compare" (head $ opOperands op) t t'
                     "compare operands must have the same shape"
     -- Output shape matches input shape, but dtype is Bool
@@ -238,7 +245,7 @@ checkCompare env op = do
         case inTypes of
             [] -> return ()
             (t:_) -> do
-                when (ttShape t /= ttShape outType) $
+                when (not (shapeMatch (ttShape t) (ttShape outType))) $
                     Left $ ShapeMismatch "compare" vid (t { ttShape = ttShape t }) outType
                         "compare output shape must match input shape"
                 when (ttDType outType /= Bool) $
@@ -301,28 +308,40 @@ computeConvOutput lhsType rhsType attrs = do
         Left $ InvalidAttribute "stablehlo.convolution" "padding"
             (T.pack $ show padding)
             ("length must be 2 * spatial_rank (= " <> T.pack (show $ 2 * length isd) <> ")")
-    -- Compute output spatial sizes
+    -- Compute output spatial sizes (skip if any involved dim is dynamic)
     outSpatial <- forM (zip [0..] isd) $ \(i, lhsSpatIdx) -> do
         let rhsSpatIdx = ksd !! fromIntegral i
-            inputSize  = fromIntegral (ttShape lhsType !! fromIntegral lhsSpatIdx) :: Int64
-            kernelSize = fromIntegral (ttShape rhsType !! fromIntegral rhsSpatIdx) :: Int64
-            padLow     = fromIntegral (padding !! (2 * fromIntegral i))
-            padHigh    = fromIntegral (padding !! (2 * fromIntegral i + 1))
-            stride     = if fromIntegral i < length strides then strides !! fromIntegral i else 1
-            rhsDilation = if fromIntegral i < length rhsDil then rhsDil !! fromIntegral i else 1
-            lhsDilation = if fromIntegral i < length lhsDil then lhsDil !! fromIntegral i else 1
-            dilatedKernel = rhsDilation * (kernelSize - 1) + 1
-            dilatedInput  = lhsDilation * (inputSize - 1) + 1
-            numerator     = dilatedInput + padLow + padHigh - dilatedKernel
-            outputSize    = (numerator `div` stride) + 1
-        when (numerator < 0) $
-            Left $ InternalError $ "convolution results in negative spatial size: input=" <> T.pack (show inputSize)
-                <> " kernel=" <> T.pack (show kernelSize) <> " pad=[" <> T.pack (show padLow) <> "," <> T.pack (show padHigh) <> "]"
-        return (fromIntegral outputSize :: Integer)
-    -- Build output shape
-    let outBatch = ttShape lhsType !! fromIntegral ib
-        outFeat  = ttShape rhsType !! fromIntegral kof
-        expectedShape = [outBatch] ++ outSpatial ++ [outFeat]
+            mInputSize  = shapeDim (ttShape lhsType) (fromIntegral lhsSpatIdx)
+            mKernelSize = shapeDim (ttShape rhsType) (fromIntegral rhsSpatIdx)
+        case (mInputSize, mKernelSize) of
+          (Nothing, _) -> return Nothing
+          (_, Nothing) -> return Nothing
+          (Just inputSize_, Just kernelSize_) -> do
+            let inputSize  = fromIntegral inputSize_ :: Int64
+                kernelSize = fromIntegral kernelSize_ :: Int64
+                padLow     = fromIntegral (padding !! (2 * fromIntegral i))
+                padHigh    = fromIntegral (padding !! (2 * fromIntegral i + 1))
+                stride     = if fromIntegral i < length strides then strides !! fromIntegral i else 1
+                rhsDilation = if fromIntegral i < length rhsDil then rhsDil !! fromIntegral i else 1
+                lhsDilation = if fromIntegral i < length lhsDil then lhsDil !! fromIntegral i else 1
+                dilatedKernel = rhsDilation * (kernelSize - 1) + 1
+                dilatedInput  = lhsDilation * (inputSize - 1) + 1
+                numerator     = dilatedInput + padLow + padHigh - dilatedKernel
+                outputSize    = (numerator `div` stride) + 1
+            when (numerator < 0) $
+                Left $ InternalError $ "convolution results in negative spatial size: input=" <> T.pack (show inputSize)
+                    <> " kernel=" <> T.pack (show kernelSize) <> " pad=[" <> T.pack (show padLow) <> "," <> T.pack (show padHigh) <> "]"
+            return (Just (fromIntegral outputSize :: Integer))
+    -- Build output shape respecting output dimension positions
+    let outBatch = shapeDim (ttShape lhsType) (fromIntegral ib)
+        outFeat  = shapeDim (ttShape rhsType) (fromIntegral kof)
+        maxPos   = fromIntegral $ maximum (ob : of_ : osd)
+        shapeAt i
+            | i == ob    = outBatch
+            | i == of_   = outFeat
+            | Just idx <- elemIndex i osd = outSpatial !! idx
+            | otherwise  = Nothing
+        expectedShape = map shapeAt [0..maxPos]
     return $ lhsType { ttShape = expectedShape }
   where
     req name = case lookupAttrInt name attrs of
@@ -368,17 +387,20 @@ checkSlice env op = do
         Left $ InvalidAttribute (opName op) "strides" (T.pack $ show strides)
             ("length " <> T.pack (show $ length strides) <> " /= rank " <> T.pack (show rank))
     expectedShape <- forM (zip5 [0..] (ttShape inType) starts limits strides) $
-        \(dim, sz, s, l, st) -> do
+        \(dim, mSz, s, l, st) -> do
             when (st <= 0) $
                 Left $ InvalidAttribute (opName op) "strides" (T.pack $ show st) "must be > 0"
-            when (s < 0) $
-                Left $ IndexOutOfBounds (opName op) dim s (fromIntegral sz)
-            when (l > fromIntegral sz) $
-                Left $ IndexOutOfBounds (opName op) dim l (fromIntegral sz)
-            when (s > l) $
-                Left $ InvalidAttribute (opName op) "limit_indices" (T.pack $ show l)
-                    ("limit " <> T.pack (show l) <> " must be >= start " <> T.pack (show s) <> " in dimension " <> T.pack (show dim))
-            return $ fromIntegral $ (l - s + st - 1) `div` st
+            case mSz of
+              Nothing -> return Nothing
+              Just sz -> do
+                when (s < 0) $
+                    Left $ IndexOutOfBounds (opName op) dim s (fromIntegral sz)
+                when (l > fromIntegral sz) $
+                    Left $ IndexOutOfBounds (opName op) dim l (fromIntegral sz)
+                when (s > l) $
+                    Left $ InvalidAttribute (opName op) "limit_indices" (T.pack $ show l)
+                        ("limit " <> T.pack (show l) <> " must be >= start " <> T.pack (show s) <> " in dimension " <> T.pack (show dim))
+                return $ Just $ fromIntegral $ (l - s + st - 1) `div` st
     let expected = inType { ttShape = expectedShape }
     expectType "slice output" (head outs) expected outType
     return $ extendEnv env outs outTypes
@@ -407,12 +429,131 @@ checkDynamicSlice env op = do
         Left $ InvalidAttribute (opName op) "slice_sizes" (T.pack $ show sliceSizes)
             ("length must match input rank " <> T.pack (show rank))
     -- Verify slice sizes are within input bounds
-    forM_ (zip (ttShape inType) sliceSizes) $ \(sz, ss) ->
-        when (fromIntegral ss > sz) $
+    forM_ (zip (ttShape inType) sliceSizes) $ \(mSz, ss) ->
+        case mSz of
+          Nothing -> return ()
+          Just sz -> when (fromIntegral ss > sz) $
             Left $ InvalidAttribute (opName op) "slice_sizes" (T.pack $ show ss)
                 ("slice size cannot exceed dimension size " <> T.pack (show sz))
-    let expected = inType { ttShape = map fromIntegral sliceSizes }
+    let expected = inType { ttShape = map (Just . fromIntegral) sliceSizes }
     expectType "dynamic_slice output" (head outs) expected outType
+    return $ extendEnv env outs outTypes
+
+-- ---------------------------------------------------------------------------
+-- stablehlo.dynamic_update_slice
+-- ---------------------------------------------------------------------------
+
+checkDynamicUpdateSlice :: ShapeEnv -> Operation -> Either ShapeError ShapeEnv
+checkDynamicUpdateSlice env op = do
+    let inTypes  = opOperandTypes op
+        outTypes = opResultTypes op
+        outs     = opResults op
+    when (length inTypes < 2) $
+        Left $ OperandCountMismatch (opName op) 2 (length inTypes)
+    when (length outTypes /= 1) $
+        Left $ OperandCountMismatch (opName op) 1 (length outTypes)
+    let [operandType, updateType] = take 2 inTypes
+        [outType] = outTypes
+        rank = length (ttShape operandType)
+        numStartIndices = length inTypes - 2
+    when (numStartIndices /= rank) $
+        Left $ OperandCountMismatch (opName op) (rank + 2) (length inTypes)
+    -- Output type must match operand type
+    expectType "dynamic_update_slice output" (head outs) operandType outType
+    -- Update type rank must match operand rank
+    when (length (ttShape updateType) /= rank) $
+        Left $ ShapeMismatch (opName op) (opOperands op !! 1) operandType updateType
+            "update must have same rank as operand"
+    return $ extendEnv env outs outTypes
+
+-- ---------------------------------------------------------------------------
+-- stablehlo.dynamic_reshape
+-- ---------------------------------------------------------------------------
+
+checkDynamicReshape :: ShapeEnv -> Operation -> Either ShapeError ShapeEnv
+checkDynamicReshape env op = do
+    let inTypes  = opOperandTypes op
+        outTypes = opResultTypes op
+        outs     = opResults op
+    when (length inTypes /= 2) $
+        Left $ OperandCountMismatch (opName op) 2 (length inTypes)
+    when (length outTypes /= 1) $
+        Left $ OperandCountMismatch (opName op) 1 (length outTypes)
+    let [operandType, shapeType] = inTypes
+        [outType] = outTypes
+    -- Shape operand must be 1-D
+    when (length (ttShape shapeType) /= 1) $
+        Left $ ShapeMismatch (opName op) (opOperands op !! 1)
+            (TensorType [Just 1] (ttDType shapeType)) shapeType
+            "shape operand must be a 1-D tensor"
+    -- Element count must be preserved when both are fully static
+    let mInElems  = shapeElems (ttShape operandType)
+        mOutElems = shapeElems (ttShape outType)
+    when (mInElems /= Nothing && mOutElems /= Nothing && mInElems /= mOutElems) $
+        Left $ ShapeMismatch (opName op) (head outs) outType operandType
+            "dynamic_reshape must preserve element count"
+    return $ extendEnv env outs outTypes
+
+-- ---------------------------------------------------------------------------
+-- stablehlo.get_dimension_size
+-- ---------------------------------------------------------------------------
+
+checkGetDimensionSize :: ShapeEnv -> Operation -> Either ShapeError ShapeEnv
+checkGetDimensionSize env op = do
+    let inTypes  = opOperandTypes op
+        outTypes = opResultTypes op
+        outs     = opResults op
+        attrs    = opAttributes op
+    when (length inTypes /= 1) $
+        Left $ OperandCountMismatch (opName op) 1 (length inTypes)
+    when (length outTypes /= 1) $
+        Left $ OperandCountMismatch (opName op) 1 (length outTypes)
+    dim <- case lookupAttrInt "dimension" attrs of
+        Just v  -> Right v
+        Nothing -> Left $ MissingAttribute (opName op) "dimension"
+    let [inType] = inTypes
+        [outType] = outTypes
+        rank = length (ttShape inType)
+    when (dim < 0 || dim >= fromIntegral rank) $
+        Left $ IndexOutOfBounds (opName op) 0 dim (fromIntegral rank)
+    -- Output must be scalar i32
+    when (ttShape outType /= [] || ttDType outType /= I32) $
+        Left $ ShapeMismatch (opName op) (head outs)
+            (TensorType [] I32) outType
+            "get_dimension_size must return scalar i32"
+    return $ extendEnv env outs outTypes
+
+-- ---------------------------------------------------------------------------
+-- stablehlo.set_dimension_size
+-- ---------------------------------------------------------------------------
+
+checkSetDimensionSize :: ShapeEnv -> Operation -> Either ShapeError ShapeEnv
+checkSetDimensionSize env op = do
+    let inTypes  = opOperandTypes op
+        outTypes = opResultTypes op
+        outs     = opResults op
+        attrs    = opAttributes op
+    when (length inTypes /= 2) $
+        Left $ OperandCountMismatch (opName op) 2 (length inTypes)
+    when (length outTypes /= 1) $
+        Left $ OperandCountMismatch (opName op) 1 (length outTypes)
+    dim <- case lookupAttrInt "dimension" attrs of
+        Just v  -> Right v
+        Nothing -> Left $ MissingAttribute (opName op) "dimension"
+    let [operandType, sizeType] = inTypes
+        [outType] = outTypes
+        rank = length (ttShape operandType)
+    when (dim < 0 || dim >= fromIntegral rank) $
+        Left $ IndexOutOfBounds (opName op) 0 dim (fromIntegral rank)
+    -- Size operand must be scalar i64
+    when (ttShape sizeType /= [] || ttDType sizeType /= I64) $
+        Left $ ShapeMismatch (opName op) (opOperands op !! 1)
+            (TensorType [] I64) sizeType
+            "size operand must be scalar i64"
+    -- Output rank must match operand rank, and the set dimension must be dynamic
+    when (length (ttShape outType) /= rank) $
+        Left $ ShapeMismatch (opName op) (head outs) operandType outType
+            "output rank must match operand rank"
     return $ extendEnv env outs outTypes
 
 -- ---------------------------------------------------------------------------
@@ -456,11 +597,13 @@ checkPad env op = do
         Left $ InvalidAttribute (opName op) "interior_padding" (T.pack $ show interior)
             ("length must match input rank " <> T.pack (show rank))
     expectedShape <- forM (zip5 (ttShape inType) low high interior [0..]) $
-        \(sz, l, h, i, dim) -> do
+        \(mSz, l, h, i, dim) -> do
             when (i < 0) $
                 Left $ InvalidAttribute (opName op) "interior_padding" (T.pack $ show i)
                     ("interior padding must be >= 0 in dimension " <> T.pack (show dim))
-            return $ fromIntegral $ l + fromIntegral sz + i * (fromIntegral sz - 1) + h
+            case mSz of
+              Nothing -> return Nothing
+              Just sz -> return $ Just $ fromIntegral $ l + fromIntegral sz + i * (fromIntegral sz - 1) + h
     let expected = inType { ttShape = expectedShape }
     expectType "pad output" (head outs) expected outType
     return $ extendEnv env outs outTypes
@@ -498,8 +641,9 @@ checkConcatenate env op = do
             when (d /= dimInt && s1 /= s2) $
                 Left $ ShapeMismatch (opName op) (opOperands op !! idx)
                     (head inTypes) t ("shapes must match except at concat dimension " <> T.pack (show dimInt))
-    let expectedDimSize = sum [ttShape t !! dimInt | t <- inTypes]
-    let expectedShape = [if d == dimInt then expectedDimSize else ttShape (head inTypes) !! d | d <- [0..rank-1]]
+    let concatDims = [ttShape t !! dimInt | t <- inTypes]
+        expectedDimSize = if any (== Nothing) concatDims then Nothing else Just (sum [x | Just x <- concatDims])
+        expectedShape = [if d == dimInt then expectedDimSize else ttShape (head inTypes) !! d | d <- [0..rank-1]]
     let expected = (head inTypes) { ttShape = expectedShape }
     expectType "concatenate output" (head outs) expected outType
     return $ extendEnv env outs outTypes
@@ -629,12 +773,16 @@ checkBroadcastInDim env op = do
         Left $ InvalidAttribute (opName op) "broadcast_dimensions" (T.pack $ show dims)
             ("length must match input rank " <> T.pack (show inRank))
     forM_ (zip [0..] dims) $ \(i, d) -> do
-        let inSize = ttShape inType !! i
-            outSize = ttShape outType !! fromIntegral d
-        when (inSize /= 1 && inSize /= outSize) $
-            Left $ ShapeMismatch (opName op) (head outs) inType outType
-                ("broadcast dimension " <> T.pack (show d) <> ": input size " <> T.pack (show inSize)
-                 <> " cannot broadcast to output size " <> T.pack (show outSize))
+        let mInSize = ttShape inType !! i
+            mOutSize = ttShape outType !! fromIntegral d
+        case (mInSize, mOutSize) of
+          (_, Nothing) -> return ()
+          (Nothing, _) -> return ()
+          (Just inSize, Just outSize) ->
+            when (inSize /= 1 && inSize /= outSize) $
+                Left $ ShapeMismatch (opName op) (head outs) inType outType
+                    ("broadcast dimension " <> T.pack (show d) <> ": input size " <> T.pack (show inSize)
+                     <> " cannot broadcast to output size " <> T.pack (show outSize))
     return $ extendEnv env outs outTypes
 
 -- ---------------------------------------------------------------------------
@@ -652,11 +800,11 @@ checkReshape env op = do
         Left $ OperandCountMismatch (opName op) 1 (length outTypes)
     let [inType] = inTypes
         [outType] = outTypes
-    let inElems = product (ttShape inType)
-        outElems = product (ttShape outType)
-    when (inElems /= outElems) $
+    let mInElems = shapeElems (ttShape inType)
+        mOutElems = shapeElems (ttShape outType)
+    when (mInElems /= Nothing && mOutElems /= Nothing && mInElems /= mOutElems) $
         Left $ ShapeMismatch (opName op) (head outs) outType inType
-            ("reshape must preserve element count: " <> T.pack (show inElems) <> " /= " <> T.pack (show outElems))
+            ("reshape must preserve element count: " <> T.pack (show mInElems) <> " /= " <> T.pack (show mOutElems))
     return $ extendEnv env outs outTypes
 
 -- ---------------------------------------------------------------------------
@@ -760,12 +908,36 @@ checkSort env op = do
     return $ extendEnv env outs outTypes
 
 -- ---------------------------------------------------------------------------
+-- Shape helpers (dynamic-aware)
+-- ---------------------------------------------------------------------------
+
+-- | Compare two shapes, treating 'Nothing' as a wildcard that matches anything.
+shapeMatch :: [Maybe Integer] -> [Maybe Integer] -> Bool
+shapeMatch s1 s2 =
+    length s1 == length s2 && all match (zip s1 s2)
+  where
+    match (Nothing, _) = True
+    match (_, Nothing) = True
+    match (Just a, Just b) = a == b
+
+-- | Compute the product of known dimensions. Returns 'Nothing' if any
+-- dimension is dynamic.
+shapeElems :: [Maybe Integer] -> Maybe Integer
+shapeElems = fmap product . sequence
+
+-- | Index into a shape, returning 'Nothing' if out of bounds or dynamic.
+shapeDim :: [Maybe Integer] -> Int -> Maybe Integer
+shapeDim sh i | i >= 0 && i < length sh = sh !! i
+              | otherwise                 = Nothing
+
+-- ---------------------------------------------------------------------------
 -- Utilities
 -- ---------------------------------------------------------------------------
 
 expectType :: Text -> ValueId -> TensorType -> TensorType -> Either ShapeError ()
 expectType ctx vid expected actual =
-    when (expected /= actual) $ Left $ ShapeMismatch ctx vid expected actual ""
+    when (not (shapeMatch (ttShape expected) (ttShape actual)) || ttDType expected /= ttDType actual)
+        $ Left $ ShapeMismatch ctx vid expected actual ""
 
 zip4 :: [a] -> [b] -> [c] -> [d] -> [(a, b, c, d)]
 zip4 (a:as) (b:bs) (c:cs) (d:ds) = (a,b,c,d) : zip4 as bs cs ds

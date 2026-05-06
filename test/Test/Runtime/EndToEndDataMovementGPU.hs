@@ -27,7 +27,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     [ testCase "slice 1D" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [5] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 5] F32) ]
                 $ do
                     x <- arg @'[5] @'F32
                     y <- slice x (v1 1) (v1 4) (v1 1)
@@ -41,7 +41,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "slice 2D" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [4, 4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 4, Just 4] F32) ]
                 $ do
                     x <- arg @'[4, 4] @'F32
                     y <- slice @'[4, 4] @'[2, 2] x (v2 1 1) (v2 3 3) (v2 1 1)
@@ -55,7 +55,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "slice with stride" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [5] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 5] F32) ]
                 $ do
                     x <- arg @'[5] @'F32
                     y <- slice x (v1 0) (v1 4) (v1 2)
@@ -69,7 +69,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "pad 2D symmetric" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[4, 4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32) ]
                 $ do
                     x <- arg @'[2, 2] @'F32
                     padVal <- constant @'[] @'F32 0.0
@@ -84,7 +84,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "pad edge" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2] F32) ]
                 $ do
                     x <- arg @'[2] @'F32
                     padVal <- constant @'[] @'F32 0.0
@@ -99,7 +99,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "gather rows" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3, 4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3, Just 4] F32) ]
                 $ do
                     x <- arg @'[3, 4] @'F32
                     idx <- constant @'[2] @'I64 0
@@ -115,9 +115,9 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "select true" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
-                , FuncArg "pred" (TensorType [2, 2] Bool)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "pred" (TensorType [Just 2, Just 2] Bool)
                 ]
                 $ do
                     t <- arg @'[2, 2] @'F32
@@ -138,9 +138,9 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "select false" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
-                , FuncArg "pred" (TensorType [2, 2] Bool)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "pred" (TensorType [Just 2, Just 2] Bool)
                 ]
                 $ do
                     t <- arg @'[2, 2] @'F32
@@ -161,7 +161,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "convert f32 to f32" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2] F32) ]
                 $ do
                     x <- arg @'[2] @'F32
                     y <- convert x
@@ -175,8 +175,8 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "conditional true" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32)
-                , FuncArg "arg1" (TensorType [2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2] F32)
                 , FuncArg "pred" (TensorType [] Bool)
                 ]
                 $ do
@@ -198,8 +198,8 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "conditional false" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32)
-                , FuncArg "arg1" (TensorType [2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2] F32)
                 , FuncArg "pred" (TensorType [] Bool)
                 ]
                 $ do
@@ -221,7 +221,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "map square" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3] F32) ]
                 $ do
                     x <- arg @'[3] @'F32
                     y <- map [x] [0] $ \[a] -> multiply a a
@@ -235,7 +235,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "dynamicSlice" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 4] F32) ]
                 $ do
                     x <- arg @'[4] @'F32
                     idx <- constant @'[] @'I64 1
@@ -250,8 +250,8 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "logicalAnd" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[3] @'Bool "main"
-                [ FuncArg "arg0" (TensorType [3] Bool)
-                , FuncArg "arg1" (TensorType [3] Bool)
+                [ FuncArg "arg0" (TensorType [Just 3] Bool)
+                , FuncArg "arg1" (TensorType [Just 3] Bool)
                 ]
                 $ do
                     a <- arg @'[3] @'Bool
@@ -269,8 +269,8 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "logicalOr" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[3] @'Bool "main"
-                [ FuncArg "arg0" (TensorType [3] Bool)
-                , FuncArg "arg1" (TensorType [3] Bool)
+                [ FuncArg "arg0" (TensorType [Just 3] Bool)
+                , FuncArg "arg1" (TensorType [Just 3] Bool)
                 ]
                 $ do
                     a <- arg @'[3] @'Bool
@@ -288,7 +288,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "logicalNot" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[3] @'Bool "main"
-                [ FuncArg "arg0" (TensorType [3] Bool) ]
+                [ FuncArg "arg0" (TensorType [Just 3] Bool) ]
                 $ do
                     a <- arg @'[3] @'Bool
                     b <- logicalNot a
@@ -302,7 +302,7 @@ tests getGPU = testGroup "EndToEnd.DataMovementGPU"
     , testCase "topK" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 4] F32) ]
                 $ do
                     x <- arg @'[4] @'F32
                     y <- topK @'[4] @'[2] 2 0 x

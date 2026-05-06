@@ -61,8 +61,10 @@ library
         HHLO.IR.Builder
         HHLO.IR.Pretty
         HHLO.EDSL.Ops
+        HHLO.EDSL.Dynamic
         HHLO.ModuleBuilder
         HHLO.Session
+        HHLO.Session.Dynamic
         HHLO.Autograd
         HHLO.Autograd.Core
         HHLO.Autograd.Grad
@@ -629,6 +631,19 @@ executable example-autograd-composite
     if !flag(examples)
         buildable: False
 
+executable example-dynamic-shapes
+    import:           warnings
+    main-is:          37-dynamic-shapes.hs
+    build-depends:
+        base          >= 4.18.2 && < 5,
+        hhlo,
+        vector        >= 0.13  && < 0.14,
+        text          >= 2.0   && < 2.2
+    hs-source-dirs:   examples
+    default-language: GHC2021
+    if !flag(examples)
+        buildable: False
+
 executable example-custom-call
     import:           warnings
     main-is:          CustomCallPlugin.hs
@@ -641,3 +656,4 @@ executable example-custom-call
     default-language: GHC2021
     if !flag(examples)
         buildable: False
+

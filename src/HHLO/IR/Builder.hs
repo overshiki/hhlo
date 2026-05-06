@@ -27,6 +27,10 @@ module HHLO.IR.Builder
     , emitOpRegions
     , emitOpRegionsN
     , emitCustomCall
+    , emitDynamicReshape
+    , emitGetDimensionSize
+    , emitDynamicUpdateSlice
+    , emitSetDimensionSize
     , emitReduce
     , emitReturn
     , runBlockBuilder
@@ -41,6 +45,9 @@ module HHLO.IR.Builder
     , moduleFromBuilder7
     , moduleFromBuilder8
     , moduleFromBuilderT
+    , moduleFromBuilderDynamic
+    , runBuilderDynamic
+    , runBuilderRaw
     , tensorType
     , KnownDType(..)
     ) where
@@ -131,8 +138,9 @@ instance (KnownShape s, KnownDType d, TupleBuilder (Tuple ss ds))
     tupleTypes _ = tensorType (Proxy @s) (Proxy @d) : tupleTypes (Proxy @(Tuple ss ds))
 
 -- | Construct a 'TensorType' from type-level shape and dtype proxies.
+-- All dimensions are statically known ('Just').
 tensorType :: forall s d. (KnownShape s, KnownDType d) => Proxy s -> Proxy d -> TensorType
-tensorType _ _ = TensorType (shapeVal (Proxy @s)) (dtypeVal (Proxy @d))
+tensorType _ _ = TensorType (map Just (shapeVal (Proxy @s))) (dtypeVal (Proxy @d))
 
 -- | Run a 'Builder' action and produce a single-result 'Function'.
 -- Argument 'ValueId's are negative: @-1@ maps to @%arg0@, @-2@ to @%arg1@, etc.
@@ -340,6 +348,37 @@ moduleFromBuilderT name args' action =
         Left err -> error $ "HHLO.ShapeCheck: " ++ show err
         Right () -> modu
 
+-- | Run a dynamic-shape 'Builder' action and produce a 'Function'.
+-- The caller must supply the result type explicitly because it cannot
+-- be inferred from the Haskell type system.
+runBuilderDynamic :: Text -> [FuncArg] -> TensorType -> Builder ValueId -> Function
+runBuilderDynamic name args' resultType builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0 1000
+        (finalVid, finalState) = runState m initState
+        ops = reverse $ bsOps finalState
+    in Function name args' [resultType] [finalVid] ops
+
+-- | Run a 'Builder' action and return the raw result along with the
+-- generated operations.  This is useful for dynamic-shape clients that
+-- need to inspect the result type at runtime.
+runBuilderRaw :: Builder a -> (a, [Operation])
+runBuilderRaw builderAction =
+    let Builder m = builderAction
+        initState = BuildState 0 [] 0 1000
+        (result, finalState) = runState m initState
+    in (result, reverse $ bsOps finalState)
+
+-- | Create a top-level 'Module' from a dynamic-shape builder.
+-- The caller supplies argument declarations and the result type.
+moduleFromBuilderDynamic :: Text -> [FuncArg] -> TensorType -> Builder ValueId -> Module
+moduleFromBuilderDynamic name args' resultType action =
+    let renamed = zipWith (\i (FuncArg _ t) -> FuncArg (T.pack ("arg" ++ show i)) t) [0::Int ..] args'
+        modu = Module [runBuilderDynamic name renamed resultType action]
+    in case checkModule modu of
+        Left err -> error $ "HHLO.ShapeCheck: " ++ show err
+        Right () -> modu
+
 -- | Emit a 'stablehlo.custom_call' operation.
 --
 -- The target name is the C symbol that XLA will look up via @dlsym@.
@@ -456,6 +495,52 @@ arg = do
 -- | Declare a function argument with a specific name (for pretty-printing only).
 argNamed :: forall s d. (KnownShape s, KnownDType d) => Text -> Builder (Tensor s d)
 argNamed _name = arg @s @d
+
+-- | Emit a 'stablehlo.dynamic_reshape' operation.
+--
+-- The @outputShape@ operand is a 1-D tensor of i64 containing the desired
+-- output dimensions. Dynamic dimensions are represented by @-1@ in the
+-- shape tensor (XLA infers them from the total element count).
+emitDynamicReshape :: ValueId -> TensorType -> ValueId -> TensorType -> [Maybe Integer] -> Builder ValueId
+emitDynamicReshape operandVid operandType shapeVid shapeType resultShape =
+    emitOp "stablehlo.dynamic_reshape"
+        [operandVid, shapeVid]
+        [operandType, shapeType]
+        []
+        (TensorType resultShape (ttDType operandType))
+
+-- | Emit a 'stablehlo.get_dimension_size' operation.
+-- Returns a scalar 'i32' tensor containing the size of the given dimension.
+emitGetDimensionSize :: ValueId -> TensorType -> Int -> Builder ValueId
+emitGetDimensionSize operandVid operandType dim =
+    emitOp "stablehlo.get_dimension_size"
+        [operandVid]
+        [operandType]
+        [AttrInt "dimension" (fromIntegral dim)]
+        (TensorType [] I32)
+
+-- | Emit a 'stablehlo.set_dimension_size' operation.
+-- Returns a tensor with the size of the given dimension set to the scalar
+-- value provided by @sizeVid@.
+emitSetDimensionSize :: ValueId -> TensorType -> ValueId -> TensorType -> Int -> Builder ValueId
+emitSetDimensionSize operandVid operandType sizeVid sizeType dim =
+    let outShape = take dim (ttShape operandType) ++ [Nothing] ++ drop (dim + 1) (ttShape operandType)
+    in emitOp "stablehlo.set_dimension_size"
+        [operandVid, sizeVid]
+        [operandType, sizeType]
+        [AttrInt "dimension" (fromIntegral dim)]
+        (TensorType outShape (ttDType operandType))
+
+-- | Emit a 'stablehlo.dynamic_update_slice' operation.
+--
+-- @startIndexVids@ contains one scalar i64 start index per dimension.
+emitDynamicUpdateSlice :: ValueId -> TensorType -> ValueId -> TensorType -> [ValueId] -> [TensorType] -> Builder ValueId
+emitDynamicUpdateSlice operandVid operandType updateVid updateType startIndexVids startIndexTypes =
+    emitOp "stablehlo.dynamic_update_slice"
+        ([operandVid, updateVid] ++ startIndexVids)
+        ([operandType, updateType] ++ startIndexTypes)
+        []
+        operandType
 
 -- | Obtain the runtime value of a type-level 'DType'.
 class KnownDType (d :: DType) where

@@ -25,7 +25,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     [ testCase "conv2d identity" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 4, Just 4, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 1] @'F32
                     k <- constant @'[3, 3, 1, 1] @'F32 0.0
@@ -40,7 +40,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     , testCase "softmax1D" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3] F32) ]
                 $ do
                     x <- arg
                     y <- softmax1D x
@@ -57,7 +57,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     , testCase "softmax2D" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg
                     y <- softmax2D x
@@ -72,7 +72,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     , testCase "batchNorm identity" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2, 2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 2, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 2, Just 2] F32) ]
                 $ do
                     x <- arg @'[1, 2, 2, 2] @'F32
                     s <- constant @'[2] @'F32 1.0
@@ -91,7 +91,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     , testCase "gelu" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3] F32) ]
                 $ do
                     x <- arg @'[3] @'F32
                     y <- gelu x
@@ -107,7 +107,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     , testCase "layerNorm" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2, 4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 4] F32) ]
                 $ do
                     x <- arg @'[1, 2, 4] @'F32
                     g <- constant @'[4] @'F32 1.0
@@ -125,7 +125,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     , testCase "conv2dWithPadding forward" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 3, 3, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 2, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 2, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 2, 2, 1] @'F32
                     k <- constant @'[2, 2, 1, 1] @'F32 1.0
@@ -141,7 +141,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     , testCase "transposeConvolution forward" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 2, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 2, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 2, 2, 1] @'F32
                     k <- constant @'[2, 2, 1, 1] @'F32 1.0
@@ -156,7 +156,7 @@ tests getGPU = testGroup "EndToEnd.NNGPU"
     , testCase "globalAvgPool" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 4, 4, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 4, Just 4, Just 2] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 2] @'F32
                     y <- globalAvgPool x

@@ -23,8 +23,8 @@ tests :: TestTree
 tests = testGroup "EndToEnd.Matmul"
     [ testCase "matmul 2D" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32)
-                , FuncArg "arg1" (TensorType [3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 3] @'F32
@@ -45,7 +45,7 @@ tests = testGroup "EndToEnd.Matmul"
             all (\(r, e) -> abs (r - e) < 0.01) (zip (V.toList result) (V.toList expected))
     , testCase "linear no bias" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3] F32) ]
                 $ do
                     x <- arg @'[3] @'F32
                     w <- constant @'[3, 2] @'F32 0.5
@@ -61,8 +61,8 @@ tests = testGroup "EndToEnd.Matmul"
         result @?= V.fromList [3.0, 3.0]
     , testCase "matmul 3D batched" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2, 3] F32)
-                , FuncArg "arg1" (TensorType [2, 3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 2, 3] @'F32
@@ -82,7 +82,7 @@ tests = testGroup "EndToEnd.Matmul"
         result @?= expected
     , testCase "linearBatched" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg
                     w <- constant @'[3, 2] @'F32 0.5
@@ -99,8 +99,8 @@ tests = testGroup "EndToEnd.Matmul"
         result @?= V.fromList [3.1, 3.1, 7.6, 7.6]
     , testCase "dotGeneral batched" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2, 3] F32)
-                , FuncArg "arg1" (TensorType [2, 3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 2, 3] @'F32
@@ -120,8 +120,8 @@ tests = testGroup "EndToEnd.Matmul"
         result @?= expected
     , testCase "dotGeneral 3D x 2D" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 3] F32)
-                , FuncArg "arg1" (TensorType [3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[1, 2, 3] @'F32
@@ -141,8 +141,8 @@ tests = testGroup "EndToEnd.Matmul"
             all (\(r, e) -> abs (r - e) < 0.01) (zip (V.toList result) (V.toList expected))
     , testCase "einsum matmul" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32)
-                , FuncArg "arg1" (TensorType [3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 3] @'F32
@@ -161,8 +161,8 @@ tests = testGroup "EndToEnd.Matmul"
             all (\(r, e) -> abs (r - e) < 0.01) (zip (V.toList result) (V.toList expected))
     , testCase "einsum transpose output" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32)
-                , FuncArg "arg1" (TensorType [3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 3] @'F32

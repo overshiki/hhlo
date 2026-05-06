@@ -127,9 +127,9 @@ bconstant :: TensorType -> Double -> Builder BTensor
 bconstant t val = do
     let shp = ttShape t
         dt  = ttDType t
-        numElems = product shp
+        numElems = product [x | Just x <- shp]
     vid <- emitOp "stablehlo.constant" [] []
-        [AttrDenseElements shp dt (replicate (fromIntegral numElems) val)] t
+        [AttrDenseElements [x | Just x <- shp] dt (replicate (fromIntegral numElems) val)] t
     return (BTensor vid t)
 
 badd :: BTensor -> BTensor -> Builder BTensor
@@ -330,14 +330,10 @@ breverse (BTensor x t) dims outType = do
 -- | Generic convolution emitter.
 --
 -- This is the low-level primitive used by VJP rules.  It emits a
--- @stablehlo.convolution@ with fully-specified dimension numbers and
--- window attributes.
-bconvolution :: BTensor -> BTensor -> Text -> Text -> [Attribute] -> TensorType -> Builder BTensor
-bconvolution (BTensor lhs lhsType) (BTensor rhs rhsType) dimNums windowStr extraAttrs outType = do
-    let attrs =
-            [ AttrString "dim_numbers" dimNums
-            , AttrString "window" windowStr
-            ] ++ extraAttrs
+-- @stablehlo.convolution@ with fully-specified structured attributes
+-- (dimension numbers and window attributes).
+bconvolution :: BTensor -> BTensor -> [Attribute] -> TensorType -> Builder BTensor
+bconvolution (BTensor lhs lhsType) (BTensor rhs rhsType) attrs outType = do
     vid <- emitOp "stablehlo.convolution"
             [lhs, rhs]
             [lhsType, rhsType]

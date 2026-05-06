@@ -461,7 +461,9 @@ instance Pretty TensorType where
     pretty (TensorType shape dtype) =
         "tensor<" <> fromText dims <> "x" <> fromText (dtypeToText dtype) <> ">"
       where
-        dims = T.intercalate "x" (map (T.pack . show) shape)
+        dims = T.intercalate "x" (map dimText shape)
+        dimText Nothing  = "?"
+        dimText (Just n) = T.pack (show n)
 
 valueRefBuilder :: ValueId -> Builder
 valueRefBuilder v = fromText (valueRef v)
@@ -485,7 +487,7 @@ prettyAttr (AttrIntList name vals) =
 prettyAttr (AttrEnum name val) =
     fromText name <> " = #stablehlo<" <> fromText name <> " " <> fromText val <> ">"
 prettyAttr (AttrDenseElements shape dtype vals) =
-    "value = dense<" <> denseElements shape dtype vals <> "> : " <> pretty (TensorType shape dtype)
+    "value = dense<" <> denseElements shape dtype vals <> "> : " <> pretty (TensorType (map Just shape) dtype)
 prettyAttr (AttrDict pairs) =
     mconcat (intersperse (", ") (map prettyDictPair pairs))
   where

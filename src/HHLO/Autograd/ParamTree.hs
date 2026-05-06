@@ -12,6 +12,7 @@ module HHLO.Autograd.ParamTree
     ) where
 
 import Data.Int (Int64)
+import Data.Maybe (fromMaybe)
 import Data.Proxy
 import GHC.Generics
 import GHC.TypeLits
@@ -22,6 +23,10 @@ import HHLO.IR.Builder
 
 import HHLO.Autograd.Core
 import HHLO.Autograd.Grad
+
+-- | Extract static dimensions from a TensorType.
+shapeList :: TensorType -> [Integer]
+shapeList = map (fromMaybe 0) . ttShape
 
 -- ---------------------------------------------------------------------------
 -- ParamTree: pack/unpack structured parameters
@@ -64,9 +69,9 @@ class ParamTree a where
             [] -> error "paramPack: empty parameter tree"
             [single] -> return single
             _ -> do
-                let totalSize = sum (map (product . ttShape . btType) bts)
+                let totalSize = sum (map (product . shapeList . btType) bts)
                     dtype = ttDType (btType (head bts))
-                    resultType = TensorType [fromIntegral totalSize] dtype
+                    resultType = TensorType [Just (fromIntegral totalSize)] dtype
                 bconcatenate bts 0 resultType
 
     default paramUnpack :: (Generic a, GParamTree (Rep a)) => BTensor -> Builder a
@@ -80,8 +85,8 @@ instance (KnownShape s, KnownDType d) => ParamTree (Tensor s d) where
     paramDType _ = dtypeVal (Proxy @d)
     paramPack tensor = do
         let bt = bfromTyped tensor
-            size = product (ttShape (btType bt))
-            flatType = TensorType [fromIntegral size] (ttDType (btType bt))
+            size = product (shapeList (btType bt))
+            flatType = TensorType [Just (fromIntegral size)] (ttDType (btType bt))
         breshape bt flatType
     paramUnpack bt = do
         let expectedType = tensorType (Proxy @s) (Proxy @d)
@@ -110,7 +115,7 @@ instance {-# OVERLAPPING #-} (KnownShape s, KnownDType d) => GParamTree (K1 R (T
         let sizeI = product (shapeVal (Proxy @s))
             size64 = fromIntegral sizeI :: Int64
             expectedType = tensorType (Proxy @s) (Proxy @d)
-            sliceType = TensorType [sizeI] (dtypeVal (Proxy @d))
+            sliceType = TensorType [Just sizeI] (dtypeVal (Proxy @d))
         sliceBt <- bslice flatBt [fromIntegral offset] [fromIntegral offset + size64] [1] sliceType
         reshaped <- breshape sliceBt expectedType
         return (K1 (btoTyped @s @d reshaped), offset + fromIntegral sizeI)
@@ -150,7 +155,7 @@ instance {-# OVERLAPPABLE #-} ParamTree a => GParamTree (K1 R a) where
             sizeI64 = fromIntegral sizeI :: Integer
             size64 = fromIntegral sizeI :: Int64
             dt = paramDType (Proxy @a)
-            sliceType = TensorType [sizeI64] dt
+            sliceType = TensorType [Just sizeI64] dt
         sliceBt <- bslice flatBt [fromIntegral offset] [fromIntegral offset + size64] [1] sliceType
         unpacked <- paramUnpack sliceBt
         return (K1 unpacked, offset + sizeI)

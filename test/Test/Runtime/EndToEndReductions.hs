@@ -22,7 +22,7 @@ tests :: TestTree
 tests = testGroup "EndToEnd.Reductions"
     [ testCase "reduceSum all" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg @'[2, 3] @'F32
                     y <- reduceSum x
@@ -35,7 +35,7 @@ tests = testGroup "EndToEnd.Reductions"
         result @?= V.fromList [21.0]
     , testCase "maxPool 2x2" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 4, Just 4, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 1] @'F32
                     y <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) x
@@ -51,7 +51,7 @@ tests = testGroup "EndToEnd.Reductions"
         result @?= V.fromList [6.0, 8.0, 14.0, 16.0]
     , testCase "avgPool 2x2" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 4, Just 4, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 1] @'F32
                     y <- avgPool (v2 2 2) (v2 2 2) x
@@ -68,7 +68,7 @@ tests = testGroup "EndToEnd.Reductions"
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     , testCase "productAll" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg @'[2, 3] @'F32
                     y <- productAll x
@@ -81,7 +81,7 @@ tests = testGroup "EndToEnd.Reductions"
         result @?= V.fromList [720.0]
     , testCase "productDim" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg @'[2, 3] @'F32
                     y <- productDim @'[2, 3] @'[2] [1] x

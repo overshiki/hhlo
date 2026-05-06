@@ -31,8 +31,8 @@ tests getGPU = testGroup "Runtime.MultiGPU"
             _  -> do
                 let numDevs = length devs
                 let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                        [ FuncArg "arg0" (TensorType [2, 2] F32)
-                        , FuncArg "arg1" (TensorType [2, 2] F32)
+                        [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                        , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                         ]
                         $ do
                             x <- arg @'[2, 2] @'F32

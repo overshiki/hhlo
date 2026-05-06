@@ -7,10 +7,14 @@ import Prelude hiding (negate)
 import Test.Tasty
 import Test.Tasty.HUnit
 
+import Data.Proxy (Proxy(..))
 import HHLO.Core.Types
 import HHLO.EDSL.Ops
+import HHLO.IR.AST (FuncArg(..), Module)
+import HHLO.IR.Builder
 import HHLO.IR.Pretty
 import HHLO.Autograd
+import HHLO.ShapeCheck
 
 import qualified Data.Text as T
 
@@ -72,9 +76,57 @@ tests = testGroup "Autograd.Rules"
     , testCase "vjpTransposeConvolution" $ do
         let f x = do
                 k <- constant @'[2, 2, 1, 1] @'F32 1.0
-                y <- transposeConvolution @1 @2 @2 @1 @1 @2 @2 @3 @3 (v2 2 2) (p2 (0,0) (0,0)) x k
+                y <- transposeConvolution @1 @2 @2 @1 @1 @2 @2 @2 @2 (v2 2 2) (p2 (0,0) (0,0)) x k
                 sumAll y
             modu = gradModule @'[1, 2, 2, 1] @'F32 f
+            text = render modu
+        assertBool "contains convolution" ("convolution" `T.isInfixOf` text)
+    , testCase "vjpConvolution checkModule" $ do
+        let f x = do
+                k <- constant @'[2, 2, 1, 1] @'F32 1.0
+                y <- conv2d @1 @3 @3 @1 @1 @2 @2 @2 @2 x k
+                sumAll y
+            modu = gradModule @'[1, 3, 3, 1] @'F32 f
+        case checkModule modu of
+            Left err -> assertFailure $ show err
+            Right () -> return ()
+    , testCase "vjpTransposeConvolution checkModule" $ do
+        let f x = do
+                k <- constant @'[2, 2, 1, 1] @'F32 1.0
+                y <- transposeConvolution @1 @2 @2 @1 @1 @2 @2 @2 @2 (v2 2 2) (p2 (0,0) (0,0)) x k
+                sumAll y
+            modu = gradModule @'[1, 2, 2, 1] @'F32 f
+        case checkModule modu of
+            Left err -> assertFailure $ show err
+            Right () -> return ()
+    , testCase "vjpConvolution through moduleFromBuilder" $ do
+        let modu :: Module
+            modu = moduleFromBuilder @'[1, 3, 3, 1] @'F32 "main"
+                [FuncArg "x" (tensorType (Proxy @'[1, 3, 3, 1]) (Proxy @'F32))]
+                $ do
+                    x <- arg @'[1, 3, 3, 1] @'F32
+                    k <- constant @'[2, 2, 1, 1] @'F32 1.0
+                    let f z = do
+                            y <- conv2d @1 @3 @3 @1 @1 @2 @2 @2 @2 z k
+                            sumAll y
+                    seed <- constant @'[] @'F32 1.0
+                    gradX <- vjp f x seed
+                    return gradX
+            text = render modu
+        assertBool "contains convolution" ("convolution" `T.isInfixOf` text)
+    , testCase "vjpTransposeConvolution through moduleFromBuilder" $ do
+        let modu :: Module
+            modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
+                [FuncArg "x" (tensorType (Proxy @'[1, 2, 2, 1]) (Proxy @'F32))]
+                $ do
+                    x <- arg @'[1, 2, 2, 1] @'F32
+                    k <- constant @'[2, 2, 1, 1] @'F32 1.0
+                    let f z = do
+                            y <- transposeConvolution @1 @2 @2 @1 @1 @2 @2 @2 @2 (v2 2 2) (p2 (0,0) (0,0)) z k
+                            sumAll y
+                    seed <- constant @'[] @'F32 1.0
+                    gradX <- vjp f x seed
+                    return gradX
             text = render modu
         assertBool "contains convolution" ("convolution" `T.isInfixOf` text)
     , testCase "gradModule2" $ do

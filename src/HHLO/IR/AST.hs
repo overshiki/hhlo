@@ -32,12 +32,13 @@ valueRef (ValueId n)
     | n >= 0    = "%" <> T.pack (show n)
     | otherwise = "%arg" <> T.pack (show (abs n - 1))
 
--- | A concrete tensor type with runtime-known shape.
+-- | A tensor type where each dimension is either statically known ('Just')
+-- or dynamic ('Nothing', rendered as @?@ in MLIR).
 data TensorType = TensorType
-    { ttShape :: [Integer]   -- ^ Empty list denotes a scalar (@tensor<T>@).
+    { ttShape :: [Maybe Integer]   -- ^ Empty list denotes a scalar (@tensor<T>@).
     , ttDType :: DType
     }
-    deriving (Eq, Show)
+    deriving (Eq, Ord, Show)
 
 -- | Attributes attached to MLIR operations.
 data Attribute

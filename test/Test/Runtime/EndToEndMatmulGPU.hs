@@ -26,8 +26,8 @@ tests getGPU = testGroup "EndToEnd.MatmulGPU"
     [ testCase "matmul 2D" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32)
-                , FuncArg "arg1" (TensorType [3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 3] @'F32
@@ -47,7 +47,7 @@ tests getGPU = testGroup "EndToEnd.MatmulGPU"
     , testCase "linear no bias" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3] F32) ]
                 $ do
                     x <- arg @'[3] @'F32
                     w <- constant @'[3, 2] @'F32 0.5
@@ -63,7 +63,7 @@ tests getGPU = testGroup "EndToEnd.MatmulGPU"
     , testCase "linearBatched" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg
                     w <- constant @'[3, 2] @'F32 0.5
@@ -79,8 +79,8 @@ tests getGPU = testGroup "EndToEnd.MatmulGPU"
     , testCase "dotGeneral batched" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2, 3] F32)
-                , FuncArg "arg1" (TensorType [2, 3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 2, 3] @'F32
@@ -99,8 +99,8 @@ tests getGPU = testGroup "EndToEnd.MatmulGPU"
     , testCase "dotGeneral 3D x 2D" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 3] F32)
-                , FuncArg "arg1" (TensorType [3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[1, 2, 3] @'F32
@@ -120,8 +120,8 @@ tests getGPU = testGroup "EndToEnd.MatmulGPU"
     , testCase "einsum matmul" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32)
-                , FuncArg "arg1" (TensorType [3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 3] @'F32
@@ -141,8 +141,8 @@ tests getGPU = testGroup "EndToEnd.MatmulGPU"
     , testCase "einsum transpose output" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32)
-                , FuncArg "arg1" (TensorType [3, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32)
+                , FuncArg "arg1" (TensorType [Just 3, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 3] @'F32

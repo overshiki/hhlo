@@ -39,6 +39,12 @@ module HHLO.Session
     , hostFromVectorSafe
     , hostToList
     , hostToVector
+      -- * Dynamic-shape host tensors
+    , DynamicHostTensor(..)
+    , dynamicHostFromVector
+    , dynamicHostToVector
+    , runDynamic
+    , runDynamicAsync
     ) where
 
 import Control.Monad (when)
@@ -51,6 +57,8 @@ import qualified Data.Vector.Storable as V
 import Foreign.C (CInt)
 import GHC.TypeLits
 import System.IO.Unsafe (unsafePerformIO)
+
+import HHLO.IR.AST (ttDType)
 
 import HHLO.Core.Types
 import HHLO.IR.AST (Module)
@@ -295,3 +303,51 @@ runAsync = run
 -- 'runAsync' already synchronizes before returning.
 awaitOutputs :: FromDeviceOutputs outputs => Session -> outputs -> IO ()
 awaitOutputs _ _ = return ()
+
+-- ---------------------------------------------------------------------------
+-- Dynamic-shape execution
+-- ---------------------------------------------------------------------------
+
+-- | A host tensor whose shape is only known at runtime.
+data DynamicHostTensor d = DynamicHostTensor
+    { dhtShape :: [Int64]          -- ^ runtime shape
+    , dhtData  :: V.Vector (HostType d)
+    }
+
+-- | Construct a 'DynamicHostTensor' from a vector and explicit shape.
+dynamicHostFromVector :: V.Vector (HostType d) -> [Int64] -> DynamicHostTensor d
+dynamicHostFromVector vec shape = DynamicHostTensor shape vec
+
+-- | Extract the underlying vector from a 'DynamicHostTensor'.
+dynamicHostToVector :: DynamicHostTensor d -> V.Vector (HostType d)
+dynamicHostToVector = dhtData
+
+-- | Upload a dynamic host tensor to the device.
+toDeviceDynamic :: forall d. (KnownDType d, V.Storable (HostType d))
+                => Session -> DynamicHostTensor d -> IO PJRTBuffer
+toDeviceDynamic sess (DynamicHostTensor shape vec) =
+    let dtype = bufferTypeForDType (dtypeVal (Proxy @d))
+    in Buf.toDevice (sessionApi sess) (sessionClient sess) vec shape dtype
+
+-- | Download a device buffer to a dynamic host tensor.
+fromDeviceDynamic :: forall d. (KnownDType d, V.Storable (HostType d))
+                  => Session -> PJRTBuffer -> IO (DynamicHostTensor d)
+fromDeviceDynamic sess buf = do
+    dims <- Buf.bufferDimensions (sessionApi sess) buf
+    let n = fromIntegral $ product dims
+    vec <- fromDeviceTyped @d sess buf n
+    return $ DynamicHostTensor dims vec
+
+-- | Run a compiled module that accepts dynamically-shaped inputs.
+-- Works on both CPU and GPU backends.
+runDynamic :: forall d. (KnownDType d, V.Storable (HostType d))
+           => Session -> Compiled -> [DynamicHostTensor d] -> IO [DynamicHostTensor d]
+runDynamic sess compiled inputs = do
+    inBufs <- mapM (toDeviceDynamic sess) inputs
+    outBufs <- execute (sessionApi sess) (compiledExec compiled) inBufs
+    mapM (fromDeviceDynamic sess) outBufs
+
+-- | Asynchronous variant of 'runDynamic'.
+runDynamicAsync :: forall d. (KnownDType d, V.Storable (HostType d))
+                => Session -> Compiled -> [DynamicHostTensor d] -> IO [DynamicHostTensor d]
+runDynamicAsync = runDynamic

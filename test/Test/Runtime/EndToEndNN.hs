@@ -22,7 +22,7 @@ tests :: TestTree
 tests = testGroup "EndToEnd.NN"
     [ testCase "conv2d identity" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 4, Just 4, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 1] @'F32
                     k <- constant @'[3, 3, 1, 1] @'F32 0.0
@@ -37,7 +37,7 @@ tests = testGroup "EndToEnd.NN"
         V.all (== 0.0) result @? "conv2d with zero kernel should output zeros"
     , testCase "softmax1D" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3] F32) ]
                 $ do
                     x <- arg
                     y <- softmax1D x
@@ -54,7 +54,7 @@ tests = testGroup "EndToEnd.NN"
             V.and (V.zipWith (\r e -> abs (r - e) < 0.01) result expected)
     , testCase "softmax2D" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg
                     y <- softmax2D x
@@ -68,7 +68,7 @@ tests = testGroup "EndToEnd.NN"
         assertBool "softmax2D row 1 sums to 1" $ abs (V.sum (V.slice 3 3 result) - 1.0) < 0.01
     , testCase "batchNorm identity" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2, 2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 2, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 2, Just 2] F32) ]
                 $ do
                     x <- arg @'[1, 2, 2, 2] @'F32
                     s <- constant @'[2] @'F32 1.0
@@ -87,7 +87,7 @@ tests = testGroup "EndToEnd.NN"
             all (\(r, e) -> abs (r - e) < 0.01) (zip (V.toList result) (V.toList inp))
     , testCase "gelu" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3] F32) ]
                 $ do
                     x <- arg @'[3] @'F32
                     y <- gelu x
@@ -103,7 +103,7 @@ tests = testGroup "EndToEnd.NN"
         assertBool "gelu(-1) ≈ -0.16" $ abs (result V.! 2 + 0.159) < 0.05
     , testCase "layerNorm" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2, 4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 4] F32) ]
                 $ do
                     x <- arg @'[1, 2, 4] @'F32
                     g <- constant @'[4] @'F32 1.0
@@ -121,7 +121,7 @@ tests = testGroup "EndToEnd.NN"
             abs (V.sum row1 / 4) < 0.1
     , testCase "conv2dWithPadding forward" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 3, 3, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 2, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 2, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 2, 2, 1] @'F32
                     k <- constant @'[2, 2, 1, 1] @'F32 1.0
@@ -140,7 +140,7 @@ tests = testGroup "EndToEnd.NN"
         result @?= expected
     , testCase "transposeConvolution forward" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 2, 2, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 2, Just 2, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 2, 2, 1] @'F32
                     k <- constant @'[2, 2, 1, 1] @'F32 1.0
@@ -155,7 +155,7 @@ tests = testGroup "EndToEnd.NN"
         assertBool "transposeConv output non-zero" $ V.sum result > 0
     , testCase "globalAvgPool" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[1, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 4, 4, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 4, Just 4, Just 2] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 2] @'F32
                     y <- globalAvgPool x

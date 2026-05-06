@@ -1862,10 +1862,10 @@ rngUniform a b = do
     -- We emit it as a stablehlo.constant then use it as an operand.
     shapeConst <- emitOp "stablehlo.constant" [] []
         [AttrDenseElements [fromIntegral (length shapeVals)] I64 (fromIntegral <$> shapeVals)]
-        (TensorType [fromIntegral (length shapeVals)] I64)
+        (TensorType [Just (fromIntegral (length shapeVals))] I64)
     vid <- emitOp "stablehlo.rng"
             [tensorValue a, tensorValue b, shapeConst]
-            [ TensorType [] F32, TensorType [] F32, TensorType [fromIntegral (length shapeVals)] I64 ]
+            [ TensorType [] F32, TensorType [] F32, TensorType [Just (fromIntegral (length shapeVals))] I64 ]
             [AttrEnum "rng_distribution" "UNIFORM"]
             outType
     return (Tensor vid)
@@ -1882,10 +1882,10 @@ rngNormal = do
     b <- constant @'[] @'F32 1.0
     shapeConst <- emitOp "stablehlo.constant" [] []
         [AttrDenseElements [fromIntegral (length shapeVals)] I64 (fromIntegral <$> shapeVals)]
-        (TensorType [fromIntegral (length shapeVals)] I64)
+        (TensorType [Just (fromIntegral (length shapeVals))] I64)
     vid <- emitOp "stablehlo.rng"
             [tensorValue a, tensorValue b, shapeConst]
-            [ TensorType [] F32, TensorType [] F32, TensorType [fromIntegral (length shapeVals)] I64 ]
+            [ TensorType [] F32, TensorType [] F32, TensorType [Just (fromIntegral (length shapeVals))] I64 ]
             [AttrEnum "rng_distribution" "NORMAL"]
             outType
     return (Tensor vid)
@@ -2035,7 +2035,7 @@ stack dim inputs = do
         reshapedShape = take (fromIntegral dim) inShape ++ [1] ++ drop (fromIntegral dim) inShape
         inType = tensorType (Proxy @sIn) (Proxy @d)
         outType = tensorType (Proxy @sOut) (Proxy @d)
-        reshapedType = TensorType (fmap fromIntegral reshapedShape) dt
+        reshapedType = TensorType (fmap (Just . fromIntegral) reshapedShape) dt
     when (n == 0) $ error "stack: empty input list"
     when (outShape /= expectedOutShape) $
         error $ "stack: output shape mismatch. Expected " ++ show expectedOutShape ++ ", got " ++ show outShape
@@ -2119,7 +2119,7 @@ einsum spec (Tensor x) (Tensor y) = do
             | label `elem` left  = s1Shape !! fromJust (label `elemIndex` left)
             | otherwise          = s2Shape !! fromJust (label `elemIndex` right)
         naturalShape    = fmap (fromIntegral . lookupDim) natural
-        naturalType     = TensorType (fmap fromIntegral naturalShape) dt
+        naturalType     = TensorType (fmap (Just . fromIntegral) naturalShape) dt
         inType1         = tensorType (Proxy @s1) (Proxy @d)
         inType2         = tensorType (Proxy @s2) (Proxy @d)
         outType         = tensorType (Proxy @sOut) (Proxy @d)

@@ -17,8 +17,8 @@ tests :: TestTree
 tests = testGroup "Builder"
     [ testCase "value ids are sequential" $ do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2, 2] @'F32
@@ -31,7 +31,7 @@ tests = testGroup "Builder"
         assertBool "arg1 present" $ "%arg1" `T.isInfixOf` rendered
     , testCase "module has func.func wrapper" $ do
         let modu = moduleFromBuilder @'[2] @'F32 "test_fn"
-                [ FuncArg "x" (TensorType [2] F32) ]
+                [ FuncArg "x" (TensorType [Just 2] F32) ]
                 $ do
                     x <- arg @'[2] @'F32
                     return x
@@ -41,7 +41,7 @@ tests = testGroup "Builder"
         assertBool "return present" $ "return" `T.isInfixOf` rendered
     , testCase "single result type in signature" $ do
         let modu = moduleFromBuilder @'[3, 4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [3, 4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 3, Just 4] F32) ]
                 $ do
                     x <- arg
                     return x

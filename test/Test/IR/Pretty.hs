@@ -15,24 +15,28 @@ tests = testGroup "Pretty"
         [ testCase "scalar type" $ do
             render (TensorType [] F32) @?= "tensor<f32>"
         , testCase "2D tensor type" $ do
-            render (TensorType [2, 3] F32) @?= "tensor<2x3xf32>"
+            render (TensorType [Just 2, Just 3] F32) @?= "tensor<2x3xf32>"
         , testCase "4D tensor type" $ do
-            render (TensorType [1, 8, 8, 16] F32) @?= "tensor<1x8x8x16xf32>"
+            render (TensorType [Just 1, Just 8, Just 8, Just 16] F32) @?= "tensor<1x8x8x16xf32>"
         , testCase "i64 tensor type" $ do
-            render (TensorType [2, 3] I64) @?= "tensor<2x3xi64>"
+            render (TensorType [Just 2, Just 3] I64) @?= "tensor<2x3xi64>"
         , testCase "bool tensor type" $ do
-            render (TensorType [2, 3] Bool) @?= "tensor<2x3xi1>"
+            render (TensorType [Just 2, Just 3] Bool) @?= "tensor<2x3xi1>"
+        , testCase "dynamic dimension" $ do
+            render (TensorType [Just 2, Nothing, Just 3] F32) @?= "tensor<2x?x3xf32>"
+        , testCase "fully dynamic" $ do
+            render (TensorType [Nothing, Nothing] F64) @?= "tensor<?x?xf64>"
         ]
     , testGroup "Custom op formats"
         [ testCase "simple add" $ do
             let fn = Function "main"
-                    [ FuncArg "arg0" (TensorType [2, 2] F32)
-                    , FuncArg "arg1" (TensorType [2, 2] F32)
+                    [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                    , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                     ]
-                    [TensorType [2, 2] F32]
+                    [TensorType [Just 2, Just 2] F32]
                     [ValueId 2]
                     [ Operation "stablehlo.add" [ValueId 0, ValueId 1]
-                        [TensorType [2, 2] F32, TensorType [2, 2] F32] [] [] [ValueId 2] [TensorType [2, 2] F32]
+                        [TensorType [Just 2, Just 2] F32, TensorType [Just 2, Just 2] F32] [] [] [ValueId 2] [TensorType [Just 2, Just 2] F32]
                     ]
             let expected =
                     "func.func @main(%arg0: tensor<2x2xf32>, %arg1: tensor<2x2xf32>) -> tensor<2x2xf32> {\n"
@@ -42,17 +46,17 @@ tests = testGroup "Pretty"
             render fn @?= expected
         , testCase "broadcast_in_dim trailing format" $ do
             let op = Operation "stablehlo.broadcast_in_dim" [ValueId 0]
-                    [TensorType [3] F32]
+                    [TensorType [Just 3] F32]
                     [AttrIntList "broadcast_dimensions" [1]]
-                    [] [ValueId 1] [TensorType [2, 3] F32]
+                    [] [ValueId 1] [TensorType [Just 2, Just 3] F32]
             let rendered = render op
             assertBool "should contain trailing dims" $
                 ", dims = [1]" `T.isInfixOf` rendered
         , testCase "compare inline direction" $ do
             let op = Operation "stablehlo.compare" [ValueId 0, ValueId 1]
-                    [TensorType [2] F32, TensorType [2] F32]
+                    [TensorType [Just 2] F32, TensorType [Just 2] F32]
                     [AttrString "comparison_direction" "LT"]
-                    [] [ValueId 2] [TensorType [2] Bool]
+                    [] [ValueId 2] [TensorType [Just 2] Bool]
             let rendered = render op
             assertBool "should contain inline direction" $
                 "\"LT\"" `T.isInfixOf` rendered
@@ -64,12 +68,12 @@ tests = testGroup "Pretty"
                 "\"stablehlo.return\"" `T.isInfixOf` rendered
         , testCase "custom_call with @symbol" $ do
             let op = Operation "stablehlo.custom_call" [ValueId 0, ValueId 1]
-                    [TensorType [4] F32, TensorType [4] F32]
+                    [TensorType [Just 4] F32, TensorType [Just 4] F32]
                     [ AttrString "call_target_name" "vector_add"
                     , AttrBool   "has_side_effect"  False
                     , AttrString "backend_config"   ""
                     , AttrRaw    "api_version = 3 : i32"
-                    ] [] [ValueId 2] [TensorType [4] F32]
+                    ] [] [ValueId 2] [TensorType [Just 4] F32]
             let rendered = render op
             assertBool "should contain @symbol prefix" $
                 "stablehlo.custom_call @vector_add(" `T.isInfixOf` rendered
@@ -99,21 +103,21 @@ tests = testGroup "Pretty"
             assertBool "dense scalar" $ "dense<3.0>" `T.isInfixOf` rendered
         , testCase "1D constant" $ do
             let op = Operation "stablehlo.constant" []
-                    [] [AttrDenseElements [3] F32 [1.0, 2.0, 3.0]] [] [ValueId 0] [TensorType [3] F32]
+                    [] [AttrDenseElements [3] F32 [1.0, 2.0, 3.0]] [] [ValueId 0] [TensorType [Just 3] F32]
             let rendered = render op
             assertBool "dense 1D" $ "dense<[1.0, 2.0, 3.0]>" `T.isInfixOf` rendered
         , testCase "2D constant" $ do
             let op = Operation "stablehlo.constant" []
-                    [] [AttrDenseElements [2, 2] F32 [1.0, 2.0, 3.0, 4.0]] [] [ValueId 0] [TensorType [2, 2] F32]
+                    [] [AttrDenseElements [2, 2] F32 [1.0, 2.0, 3.0, 4.0]] [] [ValueId 0] [TensorType [Just 2, Just 2] F32]
             let rendered = render op
             assertBool "dense 2D" $ "dense<[[1.0, 2.0], [3.0, 4.0]]>" `T.isInfixOf` rendered
         ]
     , testGroup "Multi-result ops"
         [ testCase "two results" $ do
             let op = Operation "stablehlo.rng_bit_generator" [ValueId 0]
-                    [TensorType [2] UI64]
+                    [TensorType [Just 2] UI64]
                     [AttrRaw "rng_algorithm = #stablehlo<rng_algorithm THREE_FRY>"]
-                    [] [ValueId 1, ValueId 2] [TensorType [2] UI64, TensorType [4] UI64]
+                    [] [ValueId 1, ValueId 2] [TensorType [Just 2] UI64, TensorType [Just 4] UI64]
             let rendered = render op
             assertBool "two result vids" $ "%1, %2 =" `T.isInfixOf` rendered
             assertBool "rng_bit_generator" $ "stablehlo.rng_bit_generator" `T.isInfixOf` rendered

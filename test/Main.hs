@@ -18,6 +18,7 @@ import qualified Test.Runtime.EndToEndDataMovement as DataMovement
 import qualified Test.Runtime.EndToEndMultiValue as MultiValue
 import qualified Test.Runtime.EndToEndSession as Session
 import qualified Test.Runtime.EndToEndAutograd as Autograd
+import qualified Test.Runtime.EndToEndDynamic as Dynamic
 import qualified Test.Runtime.Buffer as Buffer
 import qualified Test.Runtime.Async as Async
 import qualified Test.Runtime.Errors as Errors
@@ -54,6 +55,7 @@ cpuTests =
     , MultiValue.tests
     , Session.tests
     , Autograd.tests
+    , Dynamic.tests
     , Buffer.tests
     , Async.tests
     , Errors.tests

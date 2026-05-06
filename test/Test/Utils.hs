@@ -50,8 +50,8 @@ e2eTestF32_2arg :: String
 e2eTestF32_2arg name inputA inputB fn expected =
     testCase name $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg
@@ -74,7 +74,7 @@ e2eTestF32_1arg :: String
 e2eTestF32_1arg name input fn expected =
     testCase name $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg
@@ -117,8 +117,8 @@ e2eTestGPU_F32_2arg name inputA inputB fn expected getGPU =
     testCase name $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg
@@ -144,7 +144,7 @@ e2eTestGPU_F32_1arg name input fn expected getGPU =
     testCase name $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg

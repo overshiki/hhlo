@@ -25,7 +25,7 @@ tests :: TestTree
 tests = testGroup "EndToEnd.Shape"
     [ testCase "reshape flatten" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32) ]
                 $ do
                     x <- arg
                     y <- reshape @'[2, 2] @'[4] x
@@ -37,7 +37,7 @@ tests = testGroup "EndToEnd.Shape"
         result @?= input2x2
     , testCase "transpose swap" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32) ]
                 $ do
                     x <- arg
                     y <- transpose @'[2, 2] @'[2, 2] (v2 1 0) x
@@ -49,7 +49,7 @@ tests = testGroup "EndToEnd.Shape"
         result @?= V.fromList [1.0, 3.0, 2.0, 4.0]
     , testCase "transpose 3D" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 4, 3] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3, 4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3, Just 4] F32) ]
                 $ do
                     x <- arg @'[2, 3, 4] @'F32
                     y <- transpose @'[2, 3, 4] @'[2, 4, 3] (v3 0 2 1) x
@@ -68,7 +68,7 @@ tests = testGroup "EndToEnd.Shape"
         result @?= expected
     , testCase "transpose identity" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32) ]
                 $ do
                     x <- arg
                     y <- transpose @'[2, 2] @'[2, 2] (v2 0 1) x
@@ -89,8 +89,8 @@ tests = testGroup "EndToEnd.Shape"
         result @?= V.fromList [5.0, 5.0, 5.0, 5.0]
     , testCase "concatenate" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[4] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32)
-                , FuncArg "arg1" (TensorType [2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2] F32)
                 ]
                 $ do
                     x <- arg
@@ -114,7 +114,7 @@ tests = testGroup "EndToEnd.Shape"
         result @?= V.fromList [0.0, 1.0, 2.0, 3.0]
     , testCase "split" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [4] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 4] F32) ]
                 $ do
                     x <- arg @'[4] @'F32
                     ys <- split @'[4] @'[2] 0 2 x
@@ -129,8 +129,8 @@ tests = testGroup "EndToEnd.Shape"
         result @?= V.fromList [1.0, 2.0]
     , testCase "stack" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2] F32)
-                , FuncArg "arg1" (TensorType [2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2] F32)
                 ]
                 $ do
                     x <- arg @'[2] @'F32

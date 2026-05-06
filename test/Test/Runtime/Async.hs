@@ -23,8 +23,8 @@ tests :: TestTree
 tests = testGroup "Runtime.Async"
     [ testCase "buffer ready after sync execute" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg
@@ -41,8 +41,8 @@ tests = testGroup "Runtime.Async"
         ready @?= True
     , testCase "await buffers" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg
@@ -60,8 +60,8 @@ tests = testGroup "Runtime.Async"
         result @?= V.fromList [6.0, 8.0, 10.0, 12.0]
     , testCase "executeAsync returns output" $ withPJRTCPU $ \api client -> do
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg

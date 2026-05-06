@@ -20,6 +20,11 @@ import HHLO.IR.Builder
 
 import HHLO.Autograd.Core
 
+-- | Extract static dimensions from a TensorType. Safe for autograd because
+-- all autograd shapes are statically known.
+shapeList :: TensorType -> [Integer]
+shapeList = map (fromMaybe 0) . ttShape
+
 -- ---------------------------------------------------------------------------
 -- Main backward step dispatcher
 -- ---------------------------------------------------------------------------
@@ -267,7 +272,7 @@ vjpBroadcastInDim op resultBars cmap = case getResultBar resultBars of
             Just d  -> return d
             Nothing -> error "autograd-hhlo: broadcast_in_dim missing dims attribute"
         -- Gradient: reduce over the broadcasted dimensions.
-        let outRank = length (ttShape outType) :: Int
+        let outRank = length (shapeList outType) :: Int
             broadcastDims = map fromIntegral dims :: [Int]
             reduceDims = filter (`notElem` broadcastDims) [0 .. outRank - 1]
         if null reduceDims
@@ -325,7 +330,7 @@ vjpReduce op resultBars cmap = case getResultBar resultBars of
     -- Broadcast a reduced cotangent back to the original shape.
     broadcastLike :: BTensor -> TensorType -> [Int] -> Builder BTensor
     broadcastLike bar inType dims = do
-        let inRank = length (ttShape inType)
+        let inRank = length (shapeList inType)
             -- Build broadcast dims: map each reduced dim to its position.
             -- For reduce over dims [0,1] of a 3-D tensor, we broadcast
             -- the scalar/shape to the original shape.
@@ -352,12 +357,12 @@ vjpDot op resultBars cmap = case getResultBar resultBars of
         -- dB = A^T @ dC
         -- We need to transpose the appropriate dimensions.
         -- For simplicity, assume standard 2-D matmul.
-        let xShape = ttShape xType
-            yShape = ttShape yType
+        let xShape = shapeList xType
+            yShape = shapeList yType
         if length xShape == 2 && length yShape == 2
             then do
-                bT <- btranspose y [1, 0] (TensorType (reverse $ ttShape yType) (ttDType yType))
-                aT <- btranspose x [1, 0] (TensorType (reverse xShape) (ttDType xType))
+                bT <- btranspose y [1, 0] (TensorType (map Just $ reverse $ shapeList yType) (ttDType yType))
+                aT <- btranspose x [1, 0] (TensorType (map Just $ reverse xShape) (ttDType xType))
                 da <- bdot bar bT xType
                 db <- bdot aT bar yType
                 cmap' <- accumulate cmap (btVid x) da
@@ -374,8 +379,8 @@ vjpDotGeneral op resultBars cmap = case getResultBar resultBars of
             xType = btType x
             yType = btType y
             attrs = opAttributes op
-            rank1 = length (ttShape xType)
-            rank2 = length (ttShape yType)
+            rank1 = length (shapeList xType)
+            rank2 = length (shapeList yType)
             batchL = fromMaybe [] $ lookupAttrIntList "lhs_batching_dimensions" attrs
             batchR = fromMaybe [] $ lookupAttrIntList "rhs_batching_dimensions" attrs
             contractL = fromMaybe [] $ lookupAttrIntList "lhs_contracting_dimensions" attrs
@@ -432,7 +437,7 @@ vjpSlice op resultBars cmap = case getResultBar resultBars of
         let xVid = opOperands op !! 0
             xType = opOperandTypes op !! 0
             (start, limit, stride) = parseSliceAttrs (opAttributes op)
-            xShape = ttShape xType
+            xShape = shapeList xType
             rank = length xShape
             low = start
             isUnitStride = all (== 1) stride
@@ -502,7 +507,7 @@ vjpConcatenate op resultBars cmap = case getResultBar resultBars of
             Just d  -> return d
             Nothing -> error "autograd-hhlo: concatenate missing dimension attribute"
         -- Split bar along concat dimension into slices matching each input
-        let inputSizes = map (!! dim) (map ttShape inputTypes)
+        let inputSizes = map (!! dim) (map shapeList inputTypes)
         splitAndAccumulate bar dim 0 inputVids inputTypes inputSizes cmap
     Nothing -> return cmap
   where
@@ -514,7 +519,7 @@ vjpConcatenate op resultBars cmap = case getResultBar resultBars of
     splitAndAccumulate :: BTensor -> Int -> Integer -> [ValueId] -> [TensorType] -> [Integer] -> Map ValueId BTensor -> Builder (Map ValueId BTensor)
     splitAndAccumulate _ _ _ [] [] [] acc = return acc
     splitAndAccumulate bar dim offset (vid:vids) (itype:itypes) (sz:szs) acc = do
-        let shape = ttShape itype
+        let shape = shapeList itype
             start = zipWith (\i _ -> if i == dim then offset else 0) [0..] shape
             limit = zipWith (\i s -> if i == dim then offset + s else s) [0..] shape
             stride = replicate (length shape) (1 :: Integer)
@@ -533,7 +538,7 @@ vjpPad op resultBars cmap = case getResultBar resultBars of
         let xVid = opOperands op !! 0
             xType = opOperandTypes op !! 0
         (low, _high, interior) <- parsePadAttrs (opAttributes op)
-        let xShape = ttShape xType
+        let xShape = shapeList xType
             stride = map (+ 1) interior :: [Int64]
             limit = zipWith3 (\l s sz -> l + (sz - 1) * s + 1) low stride (map fromIntegral xShape) :: [Int64]
         dx <- bslice bar low limit stride xType
@@ -661,7 +666,7 @@ vjpReduceWindow op resultBars cmap = case getResultBar resultBars of
         let x = operandBT op 0
             xType = btType x
             xVid  = btVid x
-            xShape = ttShape xType
+            xShape = shapeList xType
             rank = length xShape
 
         -- Detect reduction type by inspecting the region.
@@ -708,7 +713,7 @@ vjpReduceWindowMax bar x xType windowDims strides padding _rank xShape cmap = do
             let zeroValType = TensorType [] (ttDType xType)
                 -- Compute the reduced output shape for NHWC non-overlapping pooling.
                 outShape = map (\(sz, w) -> (sz - fromIntegral w) `div` fromIntegral w + 1) (zip xShape windowDims)
-                outType = TensorType outShape (ttDType xType)
+                outType = TensorType (map Just outShape) (ttDType xType)
             -- Recompute forward max.
             negInf <- bconstant zeroValType (-1.0e30)
             maxVals <- breduceWindowMax x negInf windowDims strides padding outType
@@ -729,17 +734,17 @@ vjpReduceWindowMax bar x xType windowDims strides padding _rank xShape cmap = do
 -- non-overlapping reduce_window (NHWC with 2 spatial dims).
 broadcastToInputShape :: BTensor -> [Integer] -> [Int64] -> [Int64] -> Builder BTensor
 broadcastToInputShape reduced xShape windowDims _strides = do
-    let reducedShape = ttShape (btType reduced)
+    let reducedShape = shapeList (btType reduced)
         -- reducedShape = [N, outH, outW, C]
         -- Insert size-1 after outH and outW.
         reshapedShape = [reducedShape !! 0, reducedShape !! 1, 1, reducedShape !! 2, 1, reducedShape !! 3]
         -- Broadcast to [N, outH, kh, outW, kw, C]
         broadcastShape = [reducedShape !! 0, reducedShape !! 1, fromIntegral (windowDims !! 1), reducedShape !! 2, fromIntegral (windowDims !! 2), reducedShape !! 3]
         broadcastDims = [0, 1, 2, 3, 4, 5] :: [Int64]
-    reshaped <- breshape reduced (TensorType reshapedShape (ttDType (btType reduced)))
-    broadcasted <- bbroadcastInDim reshaped broadcastDims (TensorType broadcastShape (ttDType (btType reduced)))
+    reshaped <- breshape reduced (TensorType (map Just reshapedShape) (ttDType (btType reduced)))
+    broadcasted <- bbroadcastInDim reshaped broadcastDims (TensorType (map Just broadcastShape) (ttDType (btType reduced)))
     -- Reshape back to [N, H, W, C]
-    breshape broadcasted (TensorType xShape (ttDType (btType reduced)))
+    breshape broadcasted (TensorType (map Just xShape) (ttDType (btType reduced)))
 
 findRawIntList :: Text -> [Attribute] -> [Int64]
 findRawIntList _ [] = []
@@ -811,7 +816,7 @@ vjpConvolution op resultBars cmap = case getResultBar resultBars of
                 let needKernelGrad = btVid kernel < 0 || Map.member (btVid kernel) cmap
                 if needKernelGrad
                     then do
-                        dKernel <- convBackwardKernel input inputType bar stride padPairs
+                        dKernel <- convBackwardKernel input inputType bar kernelType stride padPairs
                         accumulate cmap' (btVid kernel) dKernel
                     else return cmap'
             else if kif == 3 && kof == 2
@@ -822,7 +827,7 @@ vjpConvolution op resultBars cmap = case getResultBar resultBars of
                 let needKernelGrad = btVid kernel < 0 || Map.member (btVid kernel) cmap
                 if needKernelGrad
                     then do
-                        dKernel <- transposeConvBackwardKernel input inputType bar lhsDilate padPairs
+                        dKernel <- transposeConvBackwardKernel input inputType bar kernelType lhsDilate padPairs
                         accumulate cmap' (btVid kernel) dKernel
                     else return cmap'
             else error "autograd-hhlo: convolution VJP only supports NHWC canonical attrs"
@@ -834,7 +839,7 @@ convBackwardInput bar kernel kernelType inputType stride pad = do
     flippedKernel <- breverse kernel [0, 1] kernelType
     -- Backward input uses transposed conv dimension numbers.
     -- Window attributes only apply to spatial dims (first 2 of kernel shape).
-    let spatialKernelShape = take 2 (ttShape kernelType)
+    let spatialKernelShape = take 2 (shapeList kernelType)
         spatialReversePad = reversePad pad stride spatialKernelShape
         -- When stride == 1, the backward is a regular conv (lhs_dilate=1).
         -- When stride > 1, the backward is a transpose conv; we must adjust
@@ -842,8 +847,8 @@ convBackwardInput bar kernel kernelType inputType stride pad = do
         adjustedPad = if all (== 1) stride
             then spatialReversePad
             else
-                let barShape = ttShape (btType bar)
-                    inputShape = ttShape inputType
+                let barShape = shapeList (btType bar)
+                    inputShape = shapeList inputType
                     spatialBar = take 2 (tail barShape)
                     spatialInput = take 2 (tail inputShape)
                     strideInt = map fromIntegral stride :: [Integer]
@@ -853,26 +858,55 @@ convBackwardInput bar kernel kernelType inputType stride pad = do
                 in zipWith (\[l, h] d ->
                     let h' = h + d
                     in if h' >= 0 then [l, h'] else [l + h', 0]) spatialReversePad padDiffs
-        windowStr = buildWindowString [1, 1] adjustedPad stride [1, 1]
-    bconvolution bar flippedKernel "[b, 0, 1, f]x[0, 1, o, i]->[b, 0, 1, f]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] inputType
+        padVals = concatMap (\[l, h] -> [l, h]) adjustedPad
+        convAttrs =
+            [ AttrIntList "input_spatial_dimensions" [1, 2]
+            , AttrIntList "kernel_spatial_dimensions" [0, 1]
+            , AttrIntList "output_spatial_dimensions" [1, 2]
+            , AttrInt "input_batch_dimension" 0
+            , AttrInt "input_feature_dimension" 3
+            , AttrInt "kernel_input_feature_dimension" 3
+            , AttrInt "kernel_output_feature_dimension" 2
+            , AttrInt "output_batch_dimension" 0
+            , AttrInt "output_feature_dimension" 3
+            , AttrIntList "window_strides" [1, 1]
+            , AttrIntList "padding" padVals
+            , AttrIntList "lhs_dilation" stride
+            , AttrIntList "rhs_dilation" [1, 1]
+            , AttrInt "batch_group_count" 1
+            , AttrInt "feature_group_count" 1
+            ]
+    bconvolution bar flippedKernel convAttrs inputType
 
-convBackwardKernel :: BTensor -> TensorType -> BTensor -> [Int64] -> [[Int64]] -> Builder BTensor
-convBackwardKernel input inputType bar stride pad = do
+convBackwardKernel :: BTensor -> TensorType -> BTensor -> TensorType -> [Int64] -> [[Int64]] -> Builder BTensor
+convBackwardKernel input inputType bar kernelType stride pad = do
     -- Transpose input: [N, H, W, C_in] -> [H, W, C_in, N]
-    let inputShape = ttShape inputType
+    let inputShape = shapeList inputType
         inputTShape = tail inputShape ++ [head inputShape]
-    inputT <- btranspose input [1, 2, 3, 0] (TensorType inputTShape (ttDType inputType))
+    inputT <- btranspose input [1, 2, 3, 0] (TensorType (map Just inputTShape) (ttDType inputType))
     -- Transpose bar (dy): [N, outH, outW, C_out] -> [outH, outW, N, C_out]
-    let barShape = ttShape (btType bar)
+    let barShape = shapeList (btType bar)
         barTShape = tail barShape ++ [head barShape]
-    barT <- btranspose bar [1, 2, 3, 0] (TensorType barTShape (ttDType (btType bar)))
-    -- Convolve with adapted dim numbers.  Window uses spatial dims only.
-    let spatialKernelShape = take 2 (tail inputShape)
-        outType = TensorType (spatialKernelShape ++ [last inputShape, last barShape]) (ttDType inputType)
-        windowStr = buildWindowString stride pad [1, 1] [1, 1]
-    dk <- bconvolution inputT barT "[0, 1, f, b]x[0, 1, b, f]->[0, 1, i, o]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] outType
-    -- Transpose output dims 2 and 3: [kh, kw, C_in, C_out] -> [kh, kw, C_out, C_in]
-    btranspose dk [0, 1, 3, 2] outType
+    barT <- btranspose bar [1, 2, 3, 0] (TensorType (map Just barTShape) (ttDType (btType bar)))
+    let padVals = concatMap (\[l, h] -> [l, h]) pad
+        convAttrs =
+            [ AttrIntList "input_spatial_dimensions" [0, 1]
+            , AttrIntList "kernel_spatial_dimensions" [0, 1]
+            , AttrIntList "output_spatial_dimensions" [0, 1]
+            , AttrInt "input_batch_dimension" 2
+            , AttrInt "input_feature_dimension" 3
+            , AttrInt "kernel_input_feature_dimension" 2
+            , AttrInt "kernel_output_feature_dimension" 3
+            , AttrInt "output_batch_dimension" 2
+            , AttrInt "output_feature_dimension" 3
+            , AttrIntList "window_strides" stride
+            , AttrIntList "padding" padVals
+            , AttrIntList "lhs_dilation" [1, 1]
+            , AttrIntList "rhs_dilation" [1, 1]
+            , AttrInt "batch_group_count" 1
+            , AttrInt "feature_group_count" 1
+            ]
+    bconvolution inputT barT convAttrs kernelType
 
 -- ---------------------------------------------------------------------------
 -- Transpose convolution backward helpers
@@ -882,28 +916,62 @@ transposeConvBackwardInput :: BTensor -> BTensor -> TensorType -> [Int64] -> [[I
 transposeConvBackwardInput bar kernel inputType lhsDilate pad = do
     -- Backward input: conv(dy, kernel) with stride = lhs_dilate.
     -- Padding must be reversed for the backward regular conv.
-    let spatialKernelShape = take 2 (ttShape (btType kernel))
+    let spatialKernelShape = take 2 (shapeList (btType kernel))
         spatialReversePad = reversePad pad lhsDilate spatialKernelShape
-        windowStr = buildWindowString lhsDilate spatialReversePad [1, 1] [1, 1]
-    bconvolution bar kernel "[b, 0, 1, f]x[0, 1, i, o]->[b, 0, 1, f]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] inputType
+        padVals = concatMap (\[l, h] -> [l, h]) spatialReversePad
+        convAttrs =
+            [ AttrIntList "input_spatial_dimensions" [1, 2]
+            , AttrIntList "kernel_spatial_dimensions" [0, 1]
+            , AttrIntList "output_spatial_dimensions" [1, 2]
+            , AttrInt "input_batch_dimension" 0
+            , AttrInt "input_feature_dimension" 3
+            , AttrInt "kernel_input_feature_dimension" 2
+            , AttrInt "kernel_output_feature_dimension" 3
+            , AttrInt "output_batch_dimension" 0
+            , AttrInt "output_feature_dimension" 3
+            , AttrIntList "window_strides" lhsDilate
+            , AttrIntList "padding" padVals
+            , AttrIntList "lhs_dilation" [1, 1]
+            , AttrIntList "rhs_dilation" [1, 1]
+            , AttrInt "batch_group_count" 1
+            , AttrInt "feature_group_count" 1
+            ]
+    bconvolution bar kernel convAttrs inputType
 
-transposeConvBackwardKernel :: BTensor -> TensorType -> BTensor -> [Int64] -> [[Int64]] -> Builder BTensor
-transposeConvBackwardKernel input inputType bar lhsDilate pad = do
+transposeConvBackwardKernel :: BTensor -> TensorType -> BTensor -> TensorType -> [Int64] -> [[Int64]] -> Builder BTensor
+transposeConvBackwardKernel input inputType bar kernelType lhsDilate pad = do
     -- Transpose input: [N, H, W, C_in] -> [H, W, C_in, N]
-    let inputShape = ttShape inputType
+    let inputShape = shapeList inputType
         inputTShape = tail inputShape ++ [head inputShape]
-    inputT <- btranspose input [1, 2, 3, 0] (TensorType inputTShape (ttDType inputType))
+    inputT <- btranspose input [1, 2, 3, 0] (TensorType (map Just inputTShape) (ttDType inputType))
     -- Transpose bar: [N, outH, outW, C_out] -> [outH, outW, N, C_out]
-    let barShape = ttShape (btType bar)
+    let barShape = shapeList (btType bar)
         barTShape = tail barShape ++ [head barShape]
-    barT <- btranspose bar [1, 2, 3, 0] (TensorType barTShape (ttDType (btType bar)))
-    -- Convolve with lhs_dilate = forward_lhs_dilate.  Window uses spatial dims only.
-    let spatialKernelShape = take 2 (tail inputShape)
-        outType = TensorType (spatialKernelShape ++ [last inputShape, last barShape]) (ttDType inputType)
-        windowStr = buildWindowString [1, 1] pad lhsDilate [1, 1]
-    dk <- bconvolution inputT barT "[0, 1, f, b]x[0, 1, b, f]->[0, 1, i, o]" windowStr [AttrInt "batch_group_count" 1, AttrInt "feature_group_count" 1] outType
-    -- Transpose dims 2 and 3: [kh, kw, C_in, C_out] -> [kh, kw, C_out, C_in]
-    btranspose dk [0, 1, 3, 2] outType
+    barT <- btranspose bar [1, 2, 3, 0] (TensorType (map Just barTShape) (ttDType (btType bar)))
+    let ksh = ttShape kernelType
+        convOutShape = take 2 ksh ++ [ksh !! 3, ksh !! 2]
+        convOutType = kernelType { ttShape = convOutShape }
+        padVals = concatMap (\[l, h] -> [l, h]) pad
+        convAttrs =
+            [ AttrIntList "input_spatial_dimensions" [0, 1]
+            , AttrIntList "kernel_spatial_dimensions" [0, 1]
+            , AttrIntList "output_spatial_dimensions" [0, 1]
+            , AttrInt "input_batch_dimension" 2
+            , AttrInt "input_feature_dimension" 3
+            , AttrInt "kernel_input_feature_dimension" 2
+            , AttrInt "kernel_output_feature_dimension" 3
+            , AttrInt "output_batch_dimension" 2
+            , AttrInt "output_feature_dimension" 3
+            , AttrIntList "window_strides" [1, 1]
+            , AttrIntList "padding" padVals
+            , AttrIntList "lhs_dilation" lhsDilate
+            , AttrIntList "rhs_dilation" [1, 1]
+            , AttrInt "batch_group_count" 1
+            , AttrInt "feature_group_count" 1
+            ]
+    dk <- bconvolution inputT barT convAttrs convOutType
+    -- Transpose dims 2 and 3: [kh, kw, C_out, C_in] -> [kh, kw, C_in, C_out]
+    btranspose dk [0, 1, 3, 2] kernelType
 
 -- ---------------------------------------------------------------------------
 -- Shared attribute parsing helpers

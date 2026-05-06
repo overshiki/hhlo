@@ -25,7 +25,7 @@ tests getGPU = testGroup "EndToEnd.ReductionsGPU"
     [ testCase "reduceSum all" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg @'[2, 3] @'F32
                     y <- reduceSum x
@@ -39,7 +39,7 @@ tests getGPU = testGroup "EndToEnd.ReductionsGPU"
     , testCase "maxPool 2x2" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 4, Just 4, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 1] @'F32
                     y <- maxPool (v2 2 2) (v2 2 2) (p2 (0,0) (0,0)) x
@@ -54,7 +54,7 @@ tests getGPU = testGroup "EndToEnd.ReductionsGPU"
     , testCase "avgPool 2x2" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[1, 2, 2, 1] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [1, 4, 4, 1] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 1, Just 4, Just 4, Just 1] F32) ]
                 $ do
                     x <- arg @'[1, 4, 4, 1] @'F32
                     y <- avgPool (v2 2 2) (v2 2 2) x
@@ -71,7 +71,7 @@ tests getGPU = testGroup "EndToEnd.ReductionsGPU"
     , testCase "productAll" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg @'[2, 3] @'F32
                     y <- productAll x
@@ -85,7 +85,7 @@ tests getGPU = testGroup "EndToEnd.ReductionsGPU"
     , testCase "productDim" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 3] F32) ]
+                [ FuncArg "arg0" (TensorType [Just 2, Just 3] F32) ]
                 $ do
                     x <- arg @'[2, 3] @'F32
                     y <- productDim @'[2, 3] @'[2] [1] x

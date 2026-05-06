@@ -24,8 +24,8 @@ tests getGPU = testGroup "Runtime.AsyncGPU"
     [ testCase "gpu executeAsync + await" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg
@@ -45,7 +45,7 @@ tests getGPU = testGroup "Runtime.AsyncGPU"
     , testCase "gpu buffer ready poll" $ do
         GPUResource api client dev <- getGPU
         let modu = moduleFromBuilder @'[2, 2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg

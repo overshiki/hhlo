@@ -40,8 +40,8 @@ tests = testGroup "EndToEnd"
 
         -- 3. Build and compile a program using the EDSL
         let modu = moduleFromBuilder @'[2,2] @'F32 "main"
-                [ FuncArg "arg0" (TensorType [2, 2] F32)
-                , FuncArg "arg1" (TensorType [2, 2] F32)
+                [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+                , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
                 ]
                 $ do
                     x <- arg
