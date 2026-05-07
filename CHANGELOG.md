@@ -240,3 +240,12 @@ the common compile-and-run workflow:
   * `examples/CustomCallPlugin.hs` + `examples/cbits/vector_add.cu` —
     minimal working example showing the full plugin contract.
 * Test count: 205 CPU tests + 82 GPU tests = 287 total.
+* **Bug fix**: Full GPU test suite (`HHLO_TEST_GPU=1 cabal test`) no longer
+  crashes with mutex corruption from the PJRT CUDA plugin. Root cause was the
+  `EndToEnd.Dynamic` "dynamic add on GPU" test creating a separate PJRT client
+  via `withGPU` in the CPU tree; when that client was destroyed, buffer and
+  executable finalizers could race with plugin teardown, corrupting internal
+  mutex state. Fixed by moving the GPU dynamic test to the shared `GPUResource`
+  tree (new `Test.Runtime.EndToEndDynamicGPU` module). Also added missing
+  `Test.Runtime.EndToEndDynamic` entry to `.cabal` `other-modules`.
+* Test count after fix: 216 CPU tests + 95 GPU tests = 311 total.

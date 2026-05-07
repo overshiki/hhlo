@@ -38,18 +38,7 @@ tests = testGroup "EndToEnd.Dynamic"
         dhtShape out5 @?= [5]
         dhtData out5 @?= V.fromList [2.0, 4.0, 6.0, 8.0, 10.0]
 
-    , testCase "dynamic add on GPU" $ withGPU $ \sess -> do
-        let dm = dynamicModule "main"
-                [ TensorType [Nothing] F32 ]
-                $ \argTypes -> do
-                    a <- anyArg (head argTypes)
-                    b <- anyAdd a a
-                    return (anyVid b, anyType b)
-        compiled <- compileDynamic sess dm
-
-        let input4 = dynamicHostFromVector @'F32 (V.fromList [10.0, 20.0, 30.0, 40.0]) [4]
-        [out4] <- runDynamicCompiled compiled [input4]
-        dhtShape out4 @?= [4]
-        dhtData out4 @?= V.fromList [20.0, 40.0, 60.0, 80.0]
-
+    -- Note: dynamic GPU test moved to GPU tree to avoid creating a
+    -- separate PJRT client that can leave the plugin in a bad state.
+    -- See issue #gpu-test-suite-crash.
     ]

@@ -19,6 +19,7 @@ import qualified Test.Runtime.EndToEndMultiValue as MultiValue
 import qualified Test.Runtime.EndToEndSession as Session
 import qualified Test.Runtime.EndToEndAutograd as Autograd
 import qualified Test.Runtime.EndToEndDynamic as Dynamic
+import qualified Test.Runtime.EndToEndDynamicGPU as DynamicGPU
 import qualified Test.Runtime.Buffer as Buffer
 import qualified Test.Runtime.Async as Async
 import qualified Test.Runtime.Errors as Errors
@@ -82,6 +83,7 @@ main = do
                         , MultiValueGPU.tests getGPU
                         , AutogradGPU.tests getGPU
                         , SessionGPU.tests getGPU
+                        , DynamicGPU.tests getGPU
                         ]
                     ]
         _ -> defaultMain $ testGroup "HHLO Tests" cpuTests

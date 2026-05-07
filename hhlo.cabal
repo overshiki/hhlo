@@ -509,6 +509,7 @@ test-suite hhlo-test
         Test.Runtime.EndToEndMultiValue
         Test.Runtime.EndToEndSession
         Test.Runtime.EndToEndAutograd
+        Test.Runtime.EndToEndDynamic
         Test.Runtime.Buffer
         Test.Runtime.Async
         Test.Runtime.Errors
@@ -526,6 +527,7 @@ test-suite hhlo-test
         Test.Runtime.EndToEndDataMovementGPU
         Test.Runtime.EndToEndMultiValueGPU
         Test.Runtime.EndToEndAutogradGPU
+        Test.Runtime.EndToEndDynamicGPU
         Test.Runtime.EndToEndSessionGPU
     build-depends:
         base          >= 4.18.2 && < 5,
