@@ -25,12 +25,15 @@ module HHLO.Session
     , withGPUDevice
     , sessionFrom
       -- * Compilation
-    , Compiled
+    , Compiled(..)
     , compile
       -- * Execution
     , run
     , runAsync
     , awaitOutputs
+      -- * Type-class machinery for multi-value I/O
+    , ToDeviceInputs(..)
+    , FromDeviceOutputs(..)
       -- * Host-side typed tensors
     , HostTensor
     , hostFromList
@@ -276,6 +279,16 @@ instance (FromDeviceOutputs a, FromDeviceOutputs b, FromDeviceOutputs c) => From
         c <- fromOutputs sess bufsC
         return (a, b, c)
     outputCount _ = outputCount (Proxy @a) + outputCount (Proxy @b) + outputCount (Proxy @c)
+
+-- | Zero inputs: no buffers to upload.
+instance ToDeviceInputs () where
+    toInputs _ _ = return []
+    inputCount _ = 0
+
+-- | Zero outputs: no buffers to download.
+instance FromDeviceOutputs () where
+    fromOutputs _ _ = return ()
+    outputCount _ = 0
 
 -- ---------------------------------------------------------------------------
 -- Execution

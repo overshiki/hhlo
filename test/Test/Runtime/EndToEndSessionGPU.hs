@@ -12,7 +12,7 @@ import Test.Tasty.HUnit
 
 import HHLO.Core.Types
 import HHLO.EDSL.Ops
-import HHLO.IR.Builder (Tensor)
+import HHLO.IR.Builder (Tensor, moduleFromBuilder)
 import HHLO.ModuleBuilder
 import HHLO.Session
 import HHLO.IR.AST (Module)
@@ -22,6 +22,10 @@ addOneModule :: Module
 addOneModule = buildModule @1 @1 "add_one" $ \x -> do
     one <- constant @'[2] @'F32 1.0
     add x one
+
+constantModule :: Module
+constantModule = moduleFromBuilder @'[2] @'F32 "main" [] $ do
+    constant @'[2] @'F32 42.0
 
 mulModule :: Module
 mulModule = buildModule @2 @1 "mul" $ \(x :: Tensor '[2] F32) (y :: Tensor '[2] F32) -> do
@@ -35,7 +39,15 @@ splitModule = buildModule @1 @2 "split" $ \(x :: Tensor '[2] F32) -> do
 
 tests :: IO GPUResource -> TestTree
 tests getGPU = testGroup "EndToEnd.SessionGPU"
-    [ testCase "run single-input module on GPU" $ do
+    [ testCase "run zero-input module on GPU" $ do
+        GPUResource api client dev <- getGPU
+        let sess = sessionFrom api client dev
+        compiled <- compile sess constantModule
+        (result :: HostTensor '[2] 'F32) <- run sess compiled ()
+        let vec = hostToVector result
+        vec @?= V.fromList [42.0, 42.0]
+
+    , testCase "run single-input module on GPU" $ do
         GPUResource api client dev <- getGPU
         let sess = sessionFrom api client dev
         compiled <- compile sess addOneModule

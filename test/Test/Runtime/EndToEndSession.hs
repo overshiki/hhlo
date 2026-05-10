@@ -12,7 +12,7 @@ import Test.Tasty.HUnit
 
 import HHLO.Core.Types
 import HHLO.EDSL.Ops
-import HHLO.IR.Builder (Tensor)
+import HHLO.IR.Builder (Tensor, moduleFromBuilder)
 import HHLO.ModuleBuilder
 import HHLO.Session
 import HHLO.IR.AST (Module)
@@ -22,6 +22,11 @@ addOneModule :: Module
 addOneModule = buildModule @1 @1 "add_one" $ \x -> do
     one <- constant @'[2] @'F32 1.0
     add x one
+
+-- | A module with zero inputs: returns a constant
+constantModule :: Module
+constantModule = moduleFromBuilder @'[2] @'F32 "main" [] $ do
+    constant @'[2] @'F32 42.0
 
 -- | A module with two inputs: x * y
 mulModule :: Module
@@ -37,7 +42,13 @@ splitModule = buildModule @1 @2 "split" $ \(x :: Tensor '[2] F32) -> do
 
 tests :: TestTree
 tests = testGroup "EndToEnd.Session"
-    [ testCase "run single-input module" $ withCPU $ \sess -> do
+    [ testCase "run zero-input module" $ withCPU $ \sess -> do
+        compiled <- compile sess constantModule
+        (result :: HostTensor '[2] 'F32) <- run sess compiled ()
+        let vec = hostToVector result
+        vec @?= V.fromList [42.0, 42.0]
+
+    , testCase "run single-input module" $ withCPU $ \sess -> do
         compiled <- compile sess addOneModule
         (result :: HostTensor '[2] 'F32) <- run sess compiled (hostFromList @'[2] @'F32 [1.0, 2.0])
         let vec = hostToVector result
