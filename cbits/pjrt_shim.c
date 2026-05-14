@@ -103,6 +103,91 @@ static size_t build_compile_options_proto(int num_replicas, char* out, size_t ou
     return i;
 }
 
+// Build a CompileOptionsProto with explicit device assignment.
+//
+// The proto schema (from xla/pjrt/proto/compile_options.proto) is:
+//   message CompileOptionsProto {
+//     ExecutableBuildOptionsProto executable_build_options = 3;
+//   }
+//   message ExecutableBuildOptionsProto {
+//     int64 num_replicas = 4;
+//     int64 num_partitions = 5;
+//     DeviceAssignmentProto device_assignment = 9;
+//   }
+//   message DeviceAssignmentProto {          // xla_data.proto
+//     int32 replica_count = 1;
+//     int32 computation_count = 2;
+//     repeated ComputationDevice computation_devices = 3;
+//   }
+//   message ComputationDevice {
+//     repeated int64 replica_device_ids = 1;
+//   }
+//
+// device_assignment array: global device ID for each replica.
+static size_t build_compile_options_proto_with_assignment(
+    int num_replicas,
+    const int* device_assignment,
+    size_t num_devices,
+    char* out, size_t out_size) {
+
+    char replicas_varint[10];
+    size_t replicas_len = encode_varint((uint64_t)num_replicas, replicas_varint);
+
+    char replica_count_varint[10];
+    size_t replica_count_len = encode_varint((uint64_t)num_replicas, replica_count_varint);
+
+    // Each ComputationDevice in the wire stream: tag1a(1) + len(1) + tag08(1) + varint(dev_len)
+    size_t comp_device_total = 0;
+    for (size_t k = 0; k < num_devices; ++k) {
+        char dev_varint[10];
+        size_t dev_len = encode_varint((uint64_t)device_assignment[k], dev_varint);
+        comp_device_total += 1 + 1 + 1 + dev_len; // tag1a + len_byte + tag08 + varint
+    }
+
+    // DeviceAssignmentProto = replica_count + computation_count + comp_devices
+    size_t da_len = 1 + replica_count_len + 2 + comp_device_total;
+    //                       tag08+varint     tag10+0x01
+
+    // ExecutableBuildOptions = num_replicas + num_partitions + device_assignment
+    size_t eb_len = 1 + replicas_len + 2 + 1 + 1 + da_len;
+
+    // CompileOptions = executable_build_options
+    size_t total_len = 1 + 1 + eb_len;
+
+    if (total_len > out_size) return 0;
+
+    size_t i = 0;
+    out[i++] = 0x1a;                    // field 3, wire type 2 (executable_build_options)
+    out[i++] = (char)eb_len;
+
+    out[i++] = 0x20;                    // field 4, wire type 0 (num_replicas)
+    for (size_t j = 0; j < replicas_len; ++j) out[i++] = replicas_varint[j];
+
+    out[i++] = 0x28;                    // field 5, wire type 0
+    out[i++] = 0x01;                    // num_partitions = 1
+
+    out[i++] = 0x4a;                    // field 9, wire type 2 (device_assignment)
+    out[i++] = (char)da_len;
+
+    // DeviceAssignmentProto body: replica_count, computation_count, computation_devices
+    out[i++] = 0x08;                    // field 1, wire type 0 (replica_count)
+    for (size_t j = 0; j < replica_count_len; ++j) out[i++] = replica_count_varint[j];
+
+    out[i++] = 0x10;                    // field 2, wire type 0 (computation_count)
+    out[i++] = 0x01;                    // computation_count = 1
+
+    for (size_t k = 0; k < num_devices; ++k) {
+        char dev_varint[10];
+        size_t dev_len = encode_varint((uint64_t)device_assignment[k], dev_varint);
+        out[i++] = 0x1a;                // field 3, wire type 2 (computation_devices)
+        out[i++] = (char)(1 + dev_len); // len = tag08 + varint
+        out[i++] = 0x08;                // field 1, wire type 0 (replica_device_ids)
+        for (size_t j = 0; j < dev_len; ++j) out[i++] = dev_varint[j];
+    }
+
+    return i;
+}
+
 PJRT_Error* hhlo_pjrt_compile(PJRT_Api* api, PJRT_Client* client,
                                const char* code, size_t code_size,
                                PJRT_LoadedExecutable** out_exec) {
@@ -122,6 +207,44 @@ PJRT_Error* hhlo_pjrt_compile_with_options(PJRT_Api* api, PJRT_Client* client,
 
     char compile_options_proto[16];
     size_t proto_size = build_compile_options_proto(num_replicas, compile_options_proto, sizeof(compile_options_proto));
+
+    PJRT_Client_Compile_Args args = {0};
+    args.struct_size = PJRT_Client_Compile_Args_STRUCT_SIZE;
+    args.client = client;
+    args.program = &program;
+    args.compile_options = compile_options_proto;
+    args.compile_options_size = proto_size;
+    args.executable = NULL;
+
+    PJRT_Error* err = api->PJRT_Client_Compile(&args);
+    if (err == NULL) {
+        *out_exec = args.executable;
+    }
+    return err;
+}
+
+PJRT_Error* hhlo_pjrt_compile_with_device_assignment(
+    PJRT_Api* api, PJRT_Client* client,
+    const char* code, size_t code_size,
+    int num_replicas,
+    const int* device_assignment,
+    size_t num_devices,
+    PJRT_LoadedExecutable** out_exec) {
+    PJRT_Program program = {0};
+    program.struct_size = PJRT_Program_STRUCT_SIZE;
+    program.code = (char*) code;
+    program.code_size = code_size;
+    program.format = "mlir";
+    program.format_size = 4;
+
+    char compile_options_proto[1024];
+    size_t proto_size = build_compile_options_proto_with_assignment(
+        num_replicas, device_assignment, num_devices,
+        compile_options_proto, sizeof(compile_options_proto));
+
+    if (proto_size == 0) {
+        return NULL; // Should not happen with 1024-byte buffer
+    }
 
     PJRT_Client_Compile_Args args = {0};
     args.struct_size = PJRT_Client_Compile_Args_STRUCT_SIZE;

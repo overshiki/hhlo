@@ -13,6 +13,7 @@ import Foreign.C
 import Foreign.Concurrent (newForeignPtr)
 import GHC.ForeignPtr (unsafeForeignPtrToPtr)
 import Foreign.Marshal.Alloc
+import Foreign.Marshal.Array (withArrayLen)
 import Foreign.Ptr
 import Foreign.Storable
 
@@ -22,13 +23,16 @@ import HHLO.Runtime.PJRT.Error
 
 -- | Options that control compilation.
 data CompileOptions = CompileOptions
-    { optNumReplicas :: Int    -- ^ Number of replicas (devices) to compile for.
+    { optNumReplicas      :: Int   -- ^ Number of replicas (devices) to compile for.
+    , optDeviceAssignment :: [Int] -- ^ Global device IDs for each replica. When empty,
+                                   -- XLA uses a default linear assignment @[0..N-1]@.
     }
 
 -- | Default compile options: single-device execution.
 defaultCompileOptions :: CompileOptions
 defaultCompileOptions = CompileOptions
     { optNumReplicas = 1
+    , optDeviceAssignment = []
     }
 
 -- | Compile a StableHLO MLIR text program into a PJRT executable.
@@ -43,10 +47,19 @@ compileWithOptions api client mlirText opts = do
     let utf8 = TE.encodeUtf8 mlirText
     alloca $ \execPtrPtr -> do
         err <- BS.useAsCStringLen utf8 $ \(cstr, len) -> do
-            c_pjrtCompileWithOptions (unApi api) (unClient client)
-                cstr (fromIntegral len)
-                (fromIntegral $ optNumReplicas opts)
-                execPtrPtr
+            let devIds = optDeviceAssignment opts
+            if null devIds
+                then c_pjrtCompileWithOptions (unApi api) (unClient client)
+                        cstr (fromIntegral len)
+                        (fromIntegral $ optNumReplicas opts)
+                        execPtrPtr
+                else withArrayLen (map fromIntegral devIds :: [CInt]) $ \n devArr ->
+                        c_pjrtCompileWithDeviceAssignment (unApi api) (unClient client)
+                            cstr (fromIntegral len)
+                            (fromIntegral $ optNumReplicas opts)
+                            devArr
+                            (fromIntegral n)
+                            execPtrPtr
         if err == nullPtr
             then do
                 rawPtr <- peek execPtrPtr

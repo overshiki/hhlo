@@ -62,6 +62,17 @@ foreign import ccall "pjrt_shim.h hhlo_pjrt_compile_with_options"
                              -> Ptr (Ptr PJRTExecutable)
                              -> IO (Ptr PJRTError)
 
+foreign import ccall "pjrt_shim.h hhlo_pjrt_compile_with_device_assignment"
+    c_pjrtCompileWithDeviceAssignment :: Ptr PJRTApi
+                                      -> Ptr PJRTClient
+                                      -> CString
+                                      -> CSize
+                                      -> CInt          -- num_replicas
+                                      -> Ptr CInt      -- device_assignment array
+                                      -> CSize         -- num_devices
+                                      -> Ptr (Ptr PJRTExecutable)
+                                      -> IO (Ptr PJRTError)
+
 foreign import ccall "pjrt_shim.h hhlo_pjrt_loaded_executable_destroy"
     c_pjrtLoadedExecutableDestroy :: Ptr PJRTApi -> Ptr PJRTExecutable -> IO (Ptr PJRTError)
 

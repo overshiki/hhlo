@@ -83,4 +83,26 @@ tests getGPU = testGroup "EndToEnd.SessionGPU"
         awaitOutputs sess result
         let vec = hostToVector result
         vec @?= V.fromList [6.0, 7.0]
+
+    -- Regression tests for device-assignment fix.
+    -- These explicitly target GPUs 1, 2, 3 to verify that compilation
+    -- includes the correct device_assignment and that buffers + execution
+    -- are routed to the selected device (Option B holistic fix).
+    , testCase "run on GPU device 1" $ withGPUDevice 1 $ \sess -> do
+        compiled <- compile sess addOneModule
+        (result :: HostTensor '[2] 'F32) <- run sess compiled (hostFromList @'[2] @'F32 [1.0, 2.0])
+        hostToVector result @?= V.fromList [2.0, 3.0]
+
+    , testCase "run on GPU device 2" $ withGPUDevice 2 $ \sess -> do
+        compiled <- compile sess addOneModule
+        (result :: HostTensor '[2] 'F32) <- run sess compiled (hostFromList @'[2] @'F32 [3.0, 4.0])
+        hostToVector result @?= V.fromList [4.0, 5.0]
+
+    , testCase "run on GPU device 3" $ withGPUDevice 3 $ \sess -> do
+        compiled <- compile sess mulModule
+        (result :: HostTensor '[2] 'F32) <- run sess compiled
+            ( hostFromList @'[2] @'F32 [2.0, 3.0]
+            , hostFromList @'[2] @'F32 [4.0, 5.0]
+            )
+        hostToVector result @?= V.fromList [8.0, 15.0]
     ]

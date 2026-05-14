@@ -45,6 +45,14 @@ PJRT_Error* hhlo_pjrt_compile_with_options(PJRT_Api* api, PJRT_Client* client,
                                             int num_replicas,
                                             PJRT_LoadedExecutable** out_exec);
 
+PJRT_Error* hhlo_pjrt_compile_with_device_assignment(
+    PJRT_Api* api, PJRT_Client* client,
+    const char* code, size_t code_size,
+    int num_replicas,
+    const int* device_assignment,
+    size_t num_devices,
+    PJRT_LoadedExecutable** out_exec);
+
 PJRT_Error* hhlo_pjrt_loaded_executable_destroy(PJRT_Api* api,
                                                  PJRT_LoadedExecutable* exec);
 PJRT_Error* hhlo_pjrt_executable_num_outputs(PJRT_Api* api,

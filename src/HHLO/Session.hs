@@ -20,6 +20,7 @@
 module HHLO.Session
     ( -- * Session lifecycle
       Session(..)
+    , sessionDevice
     , withCPU
     , withGPU
     , withGPUDevice
@@ -51,17 +52,11 @@ module HHLO.Session
     ) where
 
 import Control.Monad (when)
-import Data.Either (fromRight)
 import Data.Int (Int64)
 import Data.Proxy
-import Data.Text (Text)
-import qualified Data.Text as T
 import qualified Data.Vector.Storable as V
 import Foreign.C (CInt)
-import GHC.TypeLits
 import System.IO.Unsafe (unsafePerformIO)
-
-import HHLO.IR.AST (ttDType)
 
 import HHLO.Core.Types
 import HHLO.IR.AST (Module)
@@ -70,8 +65,7 @@ import HHLO.IR.Pretty (render)
 import HHLO.Runtime.PJRT.Plugin (withPJRT, getPluginPath)
 import HHLO.Runtime.PJRT.Types
 import HHLO.Runtime.Compile (CompileOptions(..), defaultCompileOptions, compileWithOptions)
-import HHLO.Runtime.Execute (execute)
-import qualified HHLO.Runtime.Async as Async
+import HHLO.Runtime.Execute (executeOn)
 import qualified HHLO.Runtime.Buffer as Buf
 import qualified HHLO.Runtime.Device as Dev
 
@@ -85,6 +79,10 @@ data Session = Session
     , sessionClient  :: !PJRTClient
     , _sessionDevice :: !PJRTDevice
     }
+
+-- | Get the device associated with a session.
+sessionDevice :: Session -> PJRTDevice
+sessionDevice = _sessionDevice
 
 -- | Bracket-style CPU session.
 withCPU :: (Session -> IO a) -> IO a
@@ -138,8 +136,13 @@ data Compiled = Compiled
 -- | Compile a StableHLO module for the session's device.
 compile :: Session -> Module -> IO Compiled
 compile sess modu = do
+    devId <- Dev.deviceId (sessionApi sess) (_sessionDevice sess)
+    let opts = defaultCompileOptions
+            { optNumReplicas = 1
+            , optDeviceAssignment = [devId]
+            }
     exec <- compileWithOptions (sessionApi sess) (sessionClient sess)
-                                (render modu) defaultCompileOptions
+                                (render modu) opts
     return (Compiled sess exec)
 
 -- ---------------------------------------------------------------------------
@@ -207,12 +210,12 @@ bufferTypeForDType UI64 = bufferTypeU64
 bufferTypeForDType Bool = bufferTypePred
 bufferTypeForDType dt   = error $ "bufferTypeForDType: unsupported dtype " ++ show dt
 
--- | Upload a typed vector to the device.
+-- | Upload a typed vector to the session's device.
 toDeviceTyped :: forall d. (KnownDType d, V.Storable (HostType d))
               => Session -> V.Vector (HostType d) -> [Int64] -> IO PJRTBuffer
 toDeviceTyped sess vec dims =
     let dtype = bufferTypeForDType (dtypeVal (Proxy @d))
-    in Buf.toDevice (sessionApi sess) (sessionClient sess) vec dims dtype
+    in Buf.toDeviceOn (sessionApi sess) (sessionClient sess) (_sessionDevice sess) vec dims dtype
 
 -- | Download a device buffer to a typed vector.
 fromDeviceTyped :: forall d. (KnownDType d, V.Storable (HostType d))
@@ -299,7 +302,7 @@ run :: (ToDeviceInputs inputs, FromDeviceOutputs outputs)
     => Session -> Compiled -> inputs -> IO outputs
 run sess compiled inputs = do
     inBufs <- toInputs sess inputs
-    outBufs <- execute (sessionApi sess) (compiledExec compiled) inBufs
+    outBufs <- executeOn (sessionApi sess) (compiledExec compiled) (_sessionDevice sess) inBufs
     fromOutputs sess outBufs
 
 -- | Asynchronous execution: upload, launch, and return immediately.
@@ -335,12 +338,12 @@ dynamicHostFromVector vec shape = DynamicHostTensor shape vec
 dynamicHostToVector :: DynamicHostTensor d -> V.Vector (HostType d)
 dynamicHostToVector = dhtData
 
--- | Upload a dynamic host tensor to the device.
+-- | Upload a dynamic host tensor to the session's device.
 toDeviceDynamic :: forall d. (KnownDType d, V.Storable (HostType d))
                 => Session -> DynamicHostTensor d -> IO PJRTBuffer
 toDeviceDynamic sess (DynamicHostTensor shape vec) =
     let dtype = bufferTypeForDType (dtypeVal (Proxy @d))
-    in Buf.toDevice (sessionApi sess) (sessionClient sess) vec shape dtype
+    in Buf.toDeviceOn (sessionApi sess) (sessionClient sess) (_sessionDevice sess) vec shape dtype
 
 -- | Download a device buffer to a dynamic host tensor.
 fromDeviceDynamic :: forall d. (KnownDType d, V.Storable (HostType d))
@@ -357,7 +360,7 @@ runDynamic :: forall d. (KnownDType d, V.Storable (HostType d))
            => Session -> Compiled -> [DynamicHostTensor d] -> IO [DynamicHostTensor d]
 runDynamic sess compiled inputs = do
     inBufs <- mapM (toDeviceDynamic sess) inputs
-    outBufs <- execute (sessionApi sess) (compiledExec compiled) inBufs
+    outBufs <- executeOn (sessionApi sess) (compiledExec compiled) (_sessionDevice sess) inBufs
     mapM (fromDeviceDynamic sess) outBufs
 
 -- | Asynchronous variant of 'runDynamic'.
