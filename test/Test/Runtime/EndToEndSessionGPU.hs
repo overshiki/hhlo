@@ -6,6 +6,8 @@
 module Test.Runtime.EndToEndSessionGPU (tests) where
 
 import Prelude hiding (compare)
+import Control.Monad (filterM)
+import Data.Char (toLower)
 import qualified Data.Vector.Storable as V
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -16,6 +18,7 @@ import HHLO.IR.Builder (Tensor, moduleFromBuilder)
 import HHLO.ModuleBuilder
 import HHLO.Session
 import HHLO.IR.AST (Module)
+import HHLO.Runtime.Device (addressableDevices, deviceKind)
 import Test.Runtime.GPUResource (GPUResource(..))
 
 addOneModule :: Module
@@ -88,17 +91,32 @@ tests getGPU = testGroup "EndToEnd.SessionGPU"
     -- These explicitly target GPUs 1, 2, 3 to verify that compilation
     -- includes the correct device_assignment and that buffers + execution
     -- are routed to the selected device (Option B holistic fix).
-    , testCase "run on GPU device 1" $ withGPUDevice 1 $ \sess -> do
+    -- We reuse the shared GPU client and pick devices by index to avoid
+    -- creating transient PJRT clients (which trigger noisy BFC allocator
+    -- retries when multiple clients compete for the same GPU memory).
+    , testCase "run on GPU device 1" $ do
+        GPUResource api client _ <- getGPU
+        devs <- addressableDevices api client
+        gpuDevs <- filterM (\d -> (/= "cpu") . Prelude.map toLower <$> deviceKind api d) devs
+        let sess = sessionFrom api client (gpuDevs !! 1)
         compiled <- compile sess addOneModule
         (result :: HostTensor '[2] 'F32) <- run sess compiled (hostFromList @'[2] @'F32 [1.0, 2.0])
         hostToVector result @?= V.fromList [2.0, 3.0]
 
-    , testCase "run on GPU device 2" $ withGPUDevice 2 $ \sess -> do
+    , testCase "run on GPU device 2" $ do
+        GPUResource api client _ <- getGPU
+        devs <- addressableDevices api client
+        gpuDevs <- filterM (\d -> (/= "cpu") . Prelude.map toLower <$> deviceKind api d) devs
+        let sess = sessionFrom api client (gpuDevs !! 2)
         compiled <- compile sess addOneModule
         (result :: HostTensor '[2] 'F32) <- run sess compiled (hostFromList @'[2] @'F32 [3.0, 4.0])
         hostToVector result @?= V.fromList [4.0, 5.0]
 
-    , testCase "run on GPU device 3" $ withGPUDevice 3 $ \sess -> do
+    , testCase "run on GPU device 3" $ do
+        GPUResource api client _ <- getGPU
+        devs <- addressableDevices api client
+        gpuDevs <- filterM (\d -> (/= "cpu") . Prelude.map toLower <$> deviceKind api d) devs
+        let sess = sessionFrom api client (gpuDevs !! 3)
         compiled <- compile sess mulModule
         (result :: HostTensor '[2] 'F32) <- run sess compiled
             ( hostFromList @'[2] @'F32 [2.0, 3.0]
