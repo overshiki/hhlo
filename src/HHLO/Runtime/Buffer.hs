@@ -18,7 +18,6 @@ import qualified Data.Vector.Storable as V
 import Foreign.C
 import qualified Foreign.Concurrent as Conc (newForeignPtr)
 import Foreign.ForeignPtr (newForeignPtr)
-import GHC.ForeignPtr (unsafeForeignPtrToPtr)
 import Data.Int (Int64)
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
@@ -75,9 +74,10 @@ fromDevice :: forall a. Storable a => PJRTApi -> PJRTBuffer -> Int -> IO (Vector
 fromDevice api buf numElems = do
     let totalBytes = numElems * sizeOf (undefined :: a)
     dstPtr <- mallocBytes totalBytes
-    checkError (unApi api) $ do
-        c_pjrtBufferToHost (unApi api) (unBuf buf)
-            (castPtr dstPtr) (fromIntegral totalBytes) nullPtr
+    withBufferPtr buf $ \bufPtr -> do
+        checkError (unApi api) $ do
+            c_pjrtBufferToHost (unApi api) bufPtr
+                (castPtr dstPtr) (fromIntegral totalBytes) nullPtr
     fptr <- newForeignPtr finalizerFree dstPtr
     return $ V.unsafeFromForeignPtr0 fptr numElems
 
@@ -88,9 +88,10 @@ fromDevice api buf numElems = do
 fromDeviceAsync :: PJRTApi -> PJRTBuffer -> Ptr () -> Int -> IO (Ptr PJRTEvent)
 fromDeviceAsync api buf dstPtr totalBytes =
     alloca $ \eventPtrPtr -> do
-        checkError (unApi api) $ do
-            c_pjrtBufferToHostAsync (unApi api) (unBuf buf)
-                (castPtr dstPtr) (fromIntegral totalBytes) eventPtrPtr
+        withBufferPtr buf $ \bufPtr -> do
+            checkError (unApi api) $ do
+                c_pjrtBufferToHostAsync (unApi api) bufPtr
+                    (castPtr dstPtr) (fromIntegral totalBytes) eventPtrPtr
         peek eventPtrPtr
 
 -- | Convenience: read an F32 buffer back as a Float vector.
@@ -103,8 +104,9 @@ bufferDimensions :: PJRTApi -> PJRTBuffer -> IO [Int64]
 bufferDimensions api buf = do
     alloca $ \dimsPtrPtr -> do
         alloca $ \numDimsPtr -> do
-            checkError (unApi api) $ do
-                c_pjrtBufferDimensions (unApi api) (unBuf buf) dimsPtrPtr numDimsPtr
+            withBufferPtr buf $ \bufPtr -> do
+                checkError (unApi api) $ do
+                    c_pjrtBufferDimensions (unApi api) bufPtr dimsPtrPtr numDimsPtr
             numDims <- peek numDimsPtr
             dimsPtr <- peek dimsPtrPtr
             peekArray (fromIntegral numDims) dimsPtr
@@ -114,16 +116,18 @@ bufferDimensions api buf = do
 bufferElementType :: PJRTApi -> PJRTBuffer -> IO CInt
 bufferElementType api buf =
     alloca $ \typePtr -> do
-        checkError (unApi api) $ do
-            c_pjrtBufferElementType (unApi api) (unBuf buf) typePtr
+        withBufferPtr buf $ \bufPtr -> do
+            checkError (unApi api) $ do
+                c_pjrtBufferElementType (unApi api) bufPtr typePtr
         peek typePtr
 
 -- | Query the on-device size of a buffer in bytes.
 bufferOnDeviceSize :: PJRTApi -> PJRTBuffer -> IO Int
 bufferOnDeviceSize api buf =
     alloca $ \sizePtr -> do
-        checkError (unApi api) $ do
-            c_pjrtBufferOnDeviceSize (unApi api) (unBuf buf) sizePtr
+        withBufferPtr buf $ \bufPtr -> do
+            checkError (unApi api) $ do
+                c_pjrtBufferOnDeviceSize (unApi api) bufPtr sizePtr
         fromIntegral <$> peek sizePtr
 
 unApi :: PJRTApi -> Ptr PJRTApi
@@ -134,6 +138,3 @@ unClient (PJRTClient p) = p
 
 unDevice :: PJRTDevice -> Ptr PJRTDevice
 unDevice (PJRTDevice p) = p
-
-unBuf :: PJRTBuffer -> Ptr PJRTBuffer
-unBuf (PJRTBuffer fp) = unsafeForeignPtrToPtr fp

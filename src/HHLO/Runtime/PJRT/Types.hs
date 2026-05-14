@@ -8,6 +8,10 @@ module HHLO.Runtime.PJRT.Types
     , PJRTError(..)
     , PJRTEvent(..)
     , PJRTDevice(..)
+    -- * ForeignPtr lifetime helpers
+    , withBufferPtr
+    , withExecPtr
+    , withBufferPtrs
     -- * Buffer type constants
     , bufferTypeInvalid
     , bufferTypePred
@@ -28,7 +32,8 @@ module HHLO.Runtime.PJRT.Types
     ) where
 
 import Foreign.C.Types (CInt(..))
-import Foreign.ForeignPtr (ForeignPtr)
+import Foreign.ForeignPtr (ForeignPtr, touchForeignPtr)
+import GHC.ForeignPtr (unsafeForeignPtrToPtr)
 import Foreign.Ptr (Ptr)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -39,6 +44,36 @@ newtype PJRTExecutable = PJRTExecutable (ForeignPtr PJRTExecutable)
 newtype PJRTError      = PJRTError      (Ptr PJRTError)
 newtype PJRTEvent      = PJRTEvent      (Ptr PJRTEvent)
 newtype PJRTDevice     = PJRTDevice     (Ptr PJRTDevice)
+
+-- | Keep a 'PJRTBuffer' alive across an FFI call.
+--
+-- This is the standard @unsafeForeignPtrToPtr + touchForeignPtr@
+-- bracket pattern.  It prevents GHC from collecting (and finalizing)
+-- the buffer while the C function is still using it.
+withBufferPtr :: PJRTBuffer -> (Ptr PJRTBuffer -> IO a) -> IO a
+withBufferPtr (PJRTBuffer fp) action = do
+    r <- action (unsafeForeignPtrToPtr fp)
+    touchForeignPtr fp
+    return r
+
+-- | Keep a 'PJRTExecutable' alive across an FFI call.
+withExecPtr :: PJRTExecutable -> (Ptr PJRTExecutable -> IO a) -> IO a
+withExecPtr (PJRTExecutable fp) action = do
+    r <- action (unsafeForeignPtrToPtr fp)
+    touchForeignPtr fp
+    return r
+
+-- | Keep a list of 'PJRTBuffer's alive across an FFI call.
+--
+-- The action receives the raw 'Ptr' values; after it returns every
+-- buffer is touched so that GHC does not run their finalizers
+-- prematurely.
+withBufferPtrs :: [PJRTBuffer] -> ([Ptr PJRTBuffer] -> IO a) -> IO a
+withBufferPtrs buffers action = do
+    let ptrs = map (\(PJRTBuffer fp) -> unsafeForeignPtrToPtr fp) buffers
+    r <- action ptrs
+    mapM_ (\(PJRTBuffer fp) -> touchForeignPtr fp) buffers
+    return r
 
 -- ---------------------------------------------------------------------------
 -- Buffer type constants (fetched from C shim at first use)

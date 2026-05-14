@@ -11,7 +11,6 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString as BS
 import Foreign.C
 import Foreign.Concurrent (newForeignPtr)
-import GHC.ForeignPtr (unsafeForeignPtrToPtr)
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array (withArrayLen)
 import Foreign.Ptr

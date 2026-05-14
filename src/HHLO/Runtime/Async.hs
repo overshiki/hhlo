@@ -11,7 +11,6 @@ import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
 import Foreign.Ptr
 import Foreign.Storable
-import GHC.ForeignPtr (unsafeForeignPtrToPtr)
 
 import HHLO.Runtime.PJRT.FFI
 import HHLO.Runtime.PJRT.Types
@@ -35,8 +34,9 @@ bufferReady :: PJRTApi -> PJRTBuffer -> IO Bool
 bufferReady api buf = do
     -- Obtain a ready-event for the buffer
     eventPtr <- alloca $ \evPtr -> do
-        checkError (unApi api) $
-            c_pjrtBufferReadyEvent (unApi api) (unBuf buf) evPtr
+        withBufferPtr buf $ \bufPtr -> do
+            checkError (unApi api) $
+                c_pjrtBufferReadyEvent (unApi api) bufPtr evPtr
         peek evPtr
     -- Check if the event is already ready
     ready <- alloca $ \readyPtr -> do
@@ -56,8 +56,9 @@ awaitBuffers api buffers =
     awaitBuffer :: PJRTApi -> PJRTBuffer -> IO ()
     awaitBuffer a b = do
         eventPtr <- alloca $ \evPtr -> do
-            checkError (unApi a) $
-                c_pjrtBufferReadyEvent (unApi a) (unBuf b) evPtr
+            withBufferPtr b $ \bufPtr -> do
+                checkError (unApi a) $
+                    c_pjrtBufferReadyEvent (unApi a) bufPtr evPtr
             peek evPtr
         checkError (unApi a) $
             c_pjrtEventAwait (unApi a) eventPtr
@@ -66,6 +67,3 @@ awaitBuffers api buffers =
 
 unApi :: PJRTApi -> Ptr PJRTApi
 unApi (PJRTApi p) = p
-
-unBuf :: PJRTBuffer -> Ptr PJRTBuffer
-unBuf (PJRTBuffer fp) = unsafeForeignPtrToPtr fp
