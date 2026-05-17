@@ -73,6 +73,7 @@ library
         HHLO.Runtime.PJRT.FFI
         HHLO.Runtime.PJRT.Types
         HHLO.Runtime.PJRT.Error
+        HHLO.Runtime.PJRT.Registry
         HHLO.Runtime.PJRT.Plugin
         HHLO.Runtime.Device
         HHLO.Runtime.Compile

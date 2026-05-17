@@ -15,6 +15,7 @@ module HHLO.Runtime.Buffer
 
 import Data.Vector.Storable (Vector)
 import qualified Data.Vector.Storable as V
+import Control.Monad (when)
 import Foreign.C
 import qualified Foreign.Concurrent as Conc (newForeignPtr)
 import Foreign.ForeignPtr (newForeignPtr)
@@ -26,6 +27,7 @@ import Foreign.Storable
 
 import HHLO.Runtime.PJRT.FFI
 import HHLO.Runtime.PJRT.Types
+import HHLO.Runtime.PJRT.Registry (isApiAlive)
 import HHLO.Runtime.PJRT.Error
 
 -- | Create a PJRT buffer from a host 'Vector'.
@@ -42,9 +44,12 @@ toDevice api client vec dims dtype =
                     c_pjrtBufferFromHost (unApi api) (unClient client)
                         (castPtr ptr) dtype dimArr (fromIntegral n) bufPtrPtr
                 rawPtr <- peek bufPtrPtr
+                let apiPtr = unApi api
                 fp <- Conc.newForeignPtr rawPtr $ do
-                    _ <- c_pjrtBufferDestroy (unApi api) rawPtr
-                    return ()
+                    alive <- isApiAlive apiPtr
+                    when alive $ do
+                        _ <- c_pjrtBufferDestroy apiPtr rawPtr
+                        return ()
                 return $ PJRTBuffer fp
 
 -- | Create a PJRT buffer on a specific device from a host 'Vector'.
@@ -58,9 +63,12 @@ toDeviceOn api client dev vec dims dtype =
                     c_pjrtBufferFromHostOnDevice (unApi api) (unClient client) (unDevice dev)
                         (castPtr ptr) dtype dimArr (fromIntegral n) bufPtrPtr
                 rawPtr <- peek bufPtrPtr
+                let apiPtr = unApi api
                 fp <- Conc.newForeignPtr rawPtr $ do
-                    _ <- c_pjrtBufferDestroy (unApi api) rawPtr
-                    return ()
+                    alive <- isApiAlive apiPtr
+                    when alive $ do
+                        _ <- c_pjrtBufferDestroy apiPtr rawPtr
+                        return ()
                 return $ PJRTBuffer fp
 
 -- | Convenience: create an F32 buffer from a Float vector.

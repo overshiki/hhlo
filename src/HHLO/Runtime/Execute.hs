@@ -13,8 +13,10 @@ import qualified Foreign.Concurrent as Conc (newForeignPtr)
 
 import Control.Concurrent.Async (mapConcurrently)
 import Control.Exception (throwIO)
+import Control.Monad (when)
 import HHLO.Runtime.PJRT.FFI
 import HHLO.Runtime.PJRT.Types
+import HHLO.Runtime.PJRT.Registry (isApiAlive)
 import HHLO.Runtime.PJRT.Error (PJRTException(..), withErrorMessage)
 
 -- | Execute a compiled program synchronously (blocking).
@@ -93,9 +95,15 @@ unDevice :: PJRTDevice -> Ptr PJRTDevice
 unDevice (PJRTDevice p) = p
 
 -- | Wrap a raw PJRT buffer pointer in a 'ForeignPtr' with a finalizer.
+-- The finalizer checks whether the API session is still alive before
+-- calling 'PJRT_Buffer_Destroy', preventing segfaults when buffers
+-- outlive their client.
 wrapBuffer :: PJRTApi -> Ptr PJRTBuffer -> IO PJRTBuffer
 wrapBuffer api rawPtr = do
+    let apiPtr = unApi api
     fp <- Conc.newForeignPtr rawPtr $ do
-        _ <- c_pjrtBufferDestroy (unApi api) rawPtr
-        return ()
+        alive <- isApiAlive apiPtr
+        when alive $ do
+            _ <- c_pjrtBufferDestroy apiPtr rawPtr
+            return ()
     return $ PJRTBuffer fp

@@ -19,6 +19,7 @@ import System.Environment (lookupEnv)
 import HHLO.Runtime.PJRT.FFI
 import HHLO.Runtime.PJRT.Types
 import HHLO.Runtime.PJRT.Error
+import HHLO.Runtime.PJRT.Registry (registerApi, unregisterApi)
 
 -- | Load a PJRT plugin from the given file path, create a client,
 -- run the action, then destroy the client.
@@ -32,12 +33,15 @@ withPJRT pluginPath action = do
             checkError nullPtr $ c_pjrtLoadPlugin path apiPtrPtr
             PJRTApi <$> peek apiPtrPtr
 
+    registerApi api
+
     client <- alloca $ \clientPtrPtr -> do
         checkError (unApi api) $ c_pjrtCreateClient (unApi api) clientPtrPtr
         PJRTClient <$> peek clientPtrPtr
 
     result <- action api client
 
+    unregisterApi api
     checkError (unApi api) $ c_pjrtClientDestroy (unApi api) (unClient client)
     return result
 
