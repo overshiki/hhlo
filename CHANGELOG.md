@@ -249,3 +249,62 @@ the common compile-and-run workflow:
   tree (new `Test.Runtime.EndToEndDynamicGPU` module). Also added missing
   `Test.Runtime.EndToEndDynamic` entry to `.cabal` `other-modules`.
 * Test count after fix: 216 CPU tests + 95 GPU tests = 311 total.
+
+## 0.11.0.0 -- 2026-05-17
+
+* **Dynamic shape support** — tensors whose dimensions are only known at
+  runtime can now be constructed, compiled, and executed end-to-end.
+  * `HHLO.EDSL.Dynamic` provides dynamic-shape variants of core ops
+    (`dynamicAdd`, `dynamicMatmul`, `dynamicConv2d`, etc.) using the new
+    `AnyTensor` type.
+  * `HHLO.Session.Dynamic` provides `runDynamic` and `runDynamicAsync`
+    for transferring and executing `DynamicHostTensor` values.
+  * `HHLO.IR.AST.TensorType` now uses `[Maybe Integer]` for dimensions
+    (`Nothing` renders as `?` in MLIR), enabling static/dynamic mixed shapes.
+  * New example: `37-dynamic-shapes.hs`.
+  * New tests: `Test.Runtime.EndToEndDynamic` and
+    `Test.Runtime.EndToEndDynamicGPU`.
+
+* **Device assignment compile option** — `CompileOptions` gains
+  `optDeviceAssignment`, and the `Session` API now routes buffer transfers
+  and execution to the selected device rather than defaulting to the first
+  device. Fixes multi-GPU session behaviour.
+  * C shim (`cbits/pjrt_shim.c`) extended to pass device assignment through
+    to `PJRT_Client_Compile`.
+
+* **ForeignPtr lifetime hardening** — critical FFI safety fix for premature
+  GC finalization.
+  * Added `withBufferPtr`, `withExecPtr`, and `withBufferPtrs` helpers to
+    `HHLO.Runtime.PJRT.Types`.
+  * `Execute`, `Buffer`, and `Async` modules hardened so that PJRT buffers
+    and executables cannot be finalized while still in use by C calls.
+
+* **Global API registry** — buffer finalizers are now safe even after the
+  PJRT session closes.
+  * New module `HHLO.Runtime.PJRT.Registry` maintains a global registry of
+    active PJRT API pointers.
+  * Prevents use-after-free crashes when GC runs after plugin teardown.
+  * New regression tests in `Test.Runtime.Buffer` and `Test.Runtime.BufferGPU`.
+
+* **Structured attribute generation** — all attribute generation across
+  the EDSL, Pretty printer, Autograd, and IR Builder now uses a typed,
+  structured approach instead of ad-hoc attribute lists.
+  * New module: `HHLO.ShapeCheck` (~950 lines) for centralized compile-time
+    shape validation logic.
+
+* **Matmul unified on `dot_general`** — `matmul` now emits canonical
+  `dot_general` attributes. Added `vjpDotGeneral` supporting arbitrary-rank
+  batched matrix multiplication, with new E2E tests for batched configs.
+
+* **Zero-argument module execution** — `ToDeviceInputs` and
+  `FromDeviceOutputs` are now exported from `HHLO.Session`, and `()`
+  instances allow compiling and executing modules with no inputs or no
+  outputs (e.g. constant generators).
+
+* GPU test harness improvements:
+  * SessionGPU regression tests refactored to reuse the shared GPU client,
+    eliminating BFC allocator retry noise.
+  * Dynamic-shape GPU tests moved into the shared `GPUResource` tree.
+
+* Test count: 218 CPU tests; GPU suite expanded with additional session,
+  buffer, and dynamic-shape coverage.
