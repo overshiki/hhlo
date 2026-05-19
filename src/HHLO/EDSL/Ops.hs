@@ -151,6 +151,7 @@ module HHLO.EDSL.Ops
     , customCall1
     , customCall2
     , customCallRaw
+    , customVJP1
     ) where
 
 import Prelude hiding (subtract, negate, maximum, minimum, abs, compare, map, tanh, sqrt, sin, cos, tan, floor, ceiling)
@@ -2204,3 +2205,24 @@ customCallRaw :: Text
               -> [TensorType]      -- ^ result types
               -> Builder [ValueId]
 customCallRaw = emitCustomCall
+
+-- | Single-result custom call with an associated VJP backward target.
+--
+-- The forward call carries a @hhlo.vjp_target@ attribute that the autograd
+-- engine reads during reverse-mode differentiation.  See 'customVJPRaw' for
+-- the low-level primitive.
+customVJP1 :: forall s d. (KnownShape s, KnownDType d)
+           => Text              -- ^ forward target symbol name
+           -> Text              -- ^ backward target symbol name
+           -> [Tensor s d]      -- ^ inputs
+           -> Text              -- ^ backend_config opaque payload
+           -> Bool              -- ^ has_side_effect
+           -> Builder (Tensor s d)
+customVJP1 fwdTarget bwdTarget inputs backendConfig hasSideEffect = do
+    let vids    = tensorValue <$> inputs
+        inType  = tensorType (Proxy @s) (Proxy @d)
+        outType = tensorType (Proxy @s) (Proxy @d)
+    vidRes <- customVJPRaw fwdTarget bwdTarget vids (replicate (length inputs) inType) backendConfig hasSideEffect 3 [outType]
+    case vidRes of
+        [vid] -> return (Tensor vid)
+        _     -> error "customVJP1: expected exactly one result"

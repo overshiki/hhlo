@@ -27,6 +27,7 @@ module HHLO.IR.Builder
     , emitOpRegions
     , emitOpRegionsN
     , emitCustomCall
+    , customVJPRaw
     , emitDynamicReshape
     , emitGetDimensionSize
     , emitDynamicUpdateSlice
@@ -398,6 +399,32 @@ emitCustomCall target operands operandTypes backendConfig hasSideEffect apiVersi
         , AttrBool   "has_side_effect"  hasSideEffect
         , AttrString "backend_config"   backendConfig
         , AttrRaw    $ "api_version = " <> T.pack (show apiVersion) <> " : i32"
+        ]
+        resultTypes
+
+-- | Emit a custom call with an associated VJP backward target.
+--
+-- The forward call carries a @hhlo.vjp_target@ attribute that the autograd
+-- engine reads during reverse-mode differentiation.  When the custom call
+-- appears in a differentiable computation, the VJP rule emits a second
+-- @stablehlo.custom_call@ with the backward target name, passing the original
+-- inputs, the original outputs, and the output cotangent as operands.
+customVJPRaw :: Text          -- ^ forward call_target_name
+             -> Text          -- ^ backward call_target_name (stored in hhlo.vjp_target)
+             -> [ValueId]     -- ^ operands
+             -> [TensorType]  -- ^ operand types
+             -> Text          -- ^ backend_config
+             -> Bool          -- ^ has_side_effect
+             -> Int32         -- ^ api_version
+             -> [TensorType]  -- ^ result types
+             -> Builder [ValueId]
+customVJPRaw fwdTarget bwdTarget operands operandTypes backendConfig hasSideEffect apiVersion resultTypes =
+    emitOpN "stablehlo.custom_call" operands operandTypes
+        [ AttrString "call_target_name" fwdTarget
+        , AttrBool   "has_side_effect"  hasSideEffect
+        , AttrString "backend_config"   backendConfig
+        , AttrRaw    $ "api_version = " <> T.pack (show apiVersion) <> " : i32"
+        , AttrString "hhlo.vjp_target"  bwdTarget
         ]
         resultTypes
 

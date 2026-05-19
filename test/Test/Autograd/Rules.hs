@@ -137,4 +137,13 @@ tests = testGroup "Autograd.Rules"
             text = render modu
         assertBool "contains func.func" ("func.func" `T.isInfixOf` text)
         assertBool "two results" $ (length $ filter (=="->") $ T.chunksOf 2 text) >= 1
+    , testCase "vjpCustomCall" $ do
+        let f x = do
+                y <- customVJP1 "myinc" "myinc_bwd" [x] "" False
+                sumAll y
+            modu = gradModule @'[2] @'F32 f
+            text = render modu
+        assertBool "contains forward myinc" ("call_target_name = \"myinc\"" `T.isInfixOf` text)
+        assertBool "contains hhlo.vjp_target" ("hhlo.vjp_target = \"myinc_bwd\"" `T.isInfixOf` text)
+        assertBool "contains backward myinc_bwd" ("call_target_name = \"myinc_bwd\"" `T.isInfixOf` text)
     ]

@@ -6,6 +6,7 @@ module HHLO.Autograd.Rules
     ( backwardStep
     ) where
 
+import Control.Monad (foldM)
 import Data.Int (Int64)
 import Data.List (sortOn, zipWith4, (\\))
 import Data.Maybe (fromMaybe, isNothing, listToMaybe)
@@ -70,6 +71,7 @@ backwardStep cmap op
         "stablehlo.sort"         -> error "autograd-hhlo: sort/topK is not differentiable"
         "stablehlo.reduce_window" -> vjpReduceWindow op resultBars cmap
         "stablehlo.convolution"   -> vjpConvolution op resultBars cmap
+        "stablehlo.custom_call"   -> vjpCustomCall op resultBars cmap
         _ -> error $ T.unpack $ "autograd-hhlo: no VJP rule for " <> opName op
   where
     resultBars = map (\r -> Map.lookup r cmap) (opResults op)
@@ -833,6 +835,34 @@ vjpConvolution op resultBars cmap = case getResultBar resultBars of
             else error "autograd-hhlo: convolution VJP only supports NHWC canonical attrs"
     Nothing -> return cmap
 
+-- | VJP rule for @stablehlo.custom_call@.
+--
+-- When the forward custom call carries a @hhlo.vjp_target@ attribute, the
+-- backward pass emits a second custom call with that target name.  The
+-- backward operands are:
+--
+-- > [forward inputs..., forward outputs..., cotangents...]
+--
+-- and the backward results are the gradients for every forward input.
+vjpCustomCall :: Operation -> [Maybe BTensor] -> Map ValueId BTensor -> Builder (Map ValueId BTensor)
+vjpCustomCall op resultBars cmap = case getResultBar resultBars of
+    Nothing -> return cmap
+    Just bar -> do
+        let attrs = opAttributes op
+            bwdTarget = lookupAttrString "hhlo.vjp_target" attrs
+        if T.null bwdTarget
+            then error $ T.unpack $ "autograd-hhlo: stablehlo.custom_call has no hhlo.vjp_target (target was "
+                     <> lookupAttrString "call_target_name" attrs <> ")"
+            else do
+                let bwdOps    = opOperands op ++ opResults op ++ [btVid bar]
+                    bwdTypes  = opOperandTypes op ++ opResultTypes op ++ [btType bar]
+                    bwdResults = opOperandTypes op
+                bwdVids <- emitCustomCall bwdTarget bwdOps bwdTypes "" False 3 bwdResults
+                foldM (\m (idx, gradVid) ->
+                        let gradBT = BTensor gradVid (opOperandTypes op !! idx)
+                        in accumulate m (opOperands op !! idx) gradBT
+                      ) cmap (zip [0..] bwdVids)
+
 convBackwardInput :: BTensor -> BTensor -> TensorType -> TensorType -> [Int64] -> [[Int64]] -> Builder BTensor
 convBackwardInput bar kernel kernelType inputType stride pad = do
     -- Flip kernel spatially (dims 0 and 1).
@@ -1104,4 +1134,10 @@ lookupAttrString :: Text -> [Attribute] -> Text
 lookupAttrString name = foldr f ""
   where
     f (AttrString n s) acc | n == name = s <> acc
+    f _ acc = acc
+
+lookupAttrBool :: Text -> [Attribute] -> Maybe Bool
+lookupAttrBool name = listToMaybe . foldr f []
+  where
+    f (AttrBool n v) acc | n == name = v : acc
     f _ acc = acc
