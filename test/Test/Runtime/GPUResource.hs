@@ -12,6 +12,7 @@ import Foreign.Ptr
 import Foreign.Storable (peek)
 
 import HHLO.Runtime.PJRT.FFI
+import HHLO.Runtime.PJRT.Plugin (getPluginPath)
 import HHLO.Runtime.PJRT.Types
 import HHLO.Runtime.PJRT.Error
 import HHLO.Runtime.Device
@@ -24,7 +25,8 @@ data GPUResource = GPUResource
 
 acquireGPU :: IO GPUResource
 acquireGPU = do
-    api <- withCString "deps/pjrt/libpjrt_cuda.so" $ \path -> do
+    pluginPath <- getPluginPath "gpu" "libpjrt_cuda.so"
+    api <- withCString pluginPath $ \path -> do
         alloca $ \apiPtrPtr -> do
             checkError nullPtr $ c_pjrtLoadPlugin path apiPtrPtr
             PJRTApi <$> peek apiPtrPtr

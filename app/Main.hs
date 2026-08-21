@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -21,6 +22,7 @@ import HHLO.Runtime.PJRT.Error
 import HHLO.Runtime.Compile
 import HHLO.Runtime.Execute
 import HHLO.Runtime.Buffer
+import System.Environment (lookupEnv)
 
 main :: IO ()
 main = do
@@ -28,7 +30,11 @@ main = do
 
     -- 1. Load plugin
     putStrLn "Loading PJRT CPU plugin..."
-    api <- withCString "deps/pjrt/libpjrt_cpu.so" $ \path -> do
+    pluginPath <- lookupEnv "HHLO_PJRT_CPU_PLUGIN" >>= \case
+        Just p  -> return p
+        Nothing -> return "deps/pjrt/libpjrt_cpu.so"
+    putStrLn $ "Using plugin: " ++ pluginPath
+    api <- withCString pluginPath $ \path -> do
         alloca $ \apiPtrPtr -> do
             checkError nullPtr $ c_pjrtLoadPlugin path apiPtrPtr
             PJRTApi <$> peek apiPtrPtr
@@ -44,8 +50,8 @@ main = do
     -- 3. Build and compile a simple StableHLO program using the EDSL
     putStrLn "Building program with EDSL..."
     let modu = moduleFromBuilder @'[2,2] @'F32 "main"
-            [ FuncArg "arg0" (TensorType [2, 2] F32)
-            , FuncArg "arg1" (TensorType [2, 2] F32)
+            [ FuncArg "arg0" (TensorType [Just 2, Just 2] F32)
+            , FuncArg "arg1" (TensorType [Just 2, Just 2] F32)
             ]
             $ do
                 x <- arg
